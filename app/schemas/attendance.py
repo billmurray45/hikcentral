@@ -329,3 +329,32 @@ class PersonHistoryResponse(BaseModel):
     total: int = Field(..., description="Всего записей")
     page: int = Field(..., description="Текущая страница")
     page_size: int = Field(..., description="Размер страницы")
+
+
+# ==========================================
+# Опоздавшие
+# ==========================================
+
+
+class LateArrivalPerson(BaseModel):
+    """Информация об опоздавшем человеке"""
+
+    employee_id: str = Field(..., description="ID сотрудника")
+    person_name: str = Field(..., description="ФИО")
+    iin: Optional[str] = Field(None, description="ИИН")
+    person_type: str = Field(..., description="Тип пользователя")
+    faculty: Optional[str] = Field(None, description="Факультет")
+    first_entry_time: str = Field(..., description="Время первого входа (HH:MM:SS)")
+    first_entry_datetime: str = Field(..., description="Дата и время первого входа (ISO)")
+    minutes_late: int = Field(..., description="Количество минут опоздания")
+
+
+class LateArrivalsResponse(BaseModel):
+    """Ответ со списком опоздавших"""
+
+    date: str = Field(..., description="Дата (YYYY-MM-DD)")
+    threshold_time: str = Field(..., description="Пороговое время (HH:MM:SS)")
+    faculty_id: str = Field(..., description="ID факультета (slug)")
+    faculty_name: str = Field(..., description="Название факультета")
+    total_late: int = Field(..., description="Всего опоздавших")
+    items: list[LateArrivalPerson] = Field(default_factory=list, description="Список опоздавших")

@@ -17,6 +17,7 @@ from app.schemas import (
     PersonFilter,
     AttendanceListResponse,
     AttendanceFilter,
+    LateArrivalsResponse,
     get_faculty_name,
 )
 
@@ -234,6 +235,58 @@ async def get_faculty_attendance(
     )
 
     return await service.get_list(filters)
+
+
+@router.get(
+    "/{faculty_id}/late-arrivals",
+    response_model=LateArrivalsResponse,
+    summary="Получить список опоздавших по факультету",
+    description="""
+    Получить список людей, чей первый вход в факультет за указанную дату был после порогового времени.
+
+    **Логика определения опоздания:**
+    - Берется только ПЕРВЫЙ вход человека в день (последующие входы игнорируются)
+    - Сравнивается время первого входа с пороговым временем
+    - В список попадают все, чей первый вход > threshold_time
+
+    **URL параметры:**
+    - `faculty_id`: Slug факультета (engineering, tourism, science, и т.д.)
+
+    **Query параметры:**
+    - `date` (обязательно): Дата для проверки (YYYY-MM-DD)
+    - `threshold_time` (опционально): Пороговое время (HH:MM:SS), по умолчанию 09:00:00
+
+    **Включает:**
+    - Всех пользователей (студенты, преподаватели, сотрудники)
+    - Время опоздания в минутах
+    - Информация отсортирована по времени прихода
+
+    **Кэширование:** 5 минут
+    """,
+)
+async def get_faculty_late_arrivals(
+    faculty_id: str,
+    date: str = Query(..., description="Дата (YYYY-MM-DD)"),
+    threshold_time: str = Query("09:00:00", description="Пороговое время (HH:MM:SS)"),
+    service: AttendanceService = Depends(get_service),
+):
+    """
+    Получить список опоздавших по факультету
+    """
+    # Проверить, что faculty_id валидный
+    faculty_name = get_faculty_name(faculty_id)
+    if not faculty_name:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Faculty with id '{faculty_id}' not found",
+        )
+
+    try:
+        return await service.get_late_arrivals(
+            faculty_slug=faculty_id, date=date, threshold_time=threshold_time
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @router.get(

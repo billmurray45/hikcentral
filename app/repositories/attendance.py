@@ -5,7 +5,7 @@ Read-only репозиторий для денормализованных да�
 
 from typing import Optional
 from datetime import datetime
-from sqlalchemy import select, func, or_, distinct
+from sqlalchemy import select, func, or_, and_, distinct
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import AttendanceRecord
@@ -878,3 +878,71 @@ class AttendanceRepository:
         ]
 
         return result_list
+
+    async def get_late_arrivals(
+        self, faculty_name: str, date: str, threshold_time: str = "09:00:00"
+    ) -> list[dict]:
+        """
+        Получить список опоздавших по факультету
+
+        Логика: Берем первый ВХОД каждого человека за день в факультете,
+        фильтруем где access_time > threshold_time
+
+        Args:
+            faculty_name: Полное название факультета
+            date: Дата в формате YYYY-MM-DD
+            threshold_time: Пороговое время в формате HH:MM:SS
+
+        Returns:
+            Список dict с данными об опоздавших
+        """
+        # Подзапрос: найти ID первой записи "Вход" для каждого человека за день
+        subquery = (
+            select(AttendanceRecord.employee_id, func.min(AttendanceRecord.id).label("first_entry_id"))
+            .where(
+                and_(
+                    AttendanceRecord.access_date == date,
+                    AttendanceRecord.direction == "Вход",
+                    AttendanceRecord.person_group.ilike(f"%{faculty_name}%"),
+                )
+            )
+            .group_by(AttendanceRecord.employee_id)
+            .subquery()
+        )
+
+        # Основной запрос: получить записи первых входов
+        query = (
+            select(AttendanceRecord)
+            .join(subquery, AttendanceRecord.id == subquery.c.first_entry_id)
+            .where(AttendanceRecord.access_time > threshold_time)
+            .order_by(AttendanceRecord.access_time.asc())
+        )
+
+        result = await self.session.execute(query)
+        records = result.scalars().all()
+
+        # Вычислить минуты опоздания
+        late_arrivals = []
+        for record in records:
+            # Парсинг времени для вычисления опоздания
+            threshold_parts = threshold_time.split(":")
+            arrival_parts = record.access_time.split(":")
+
+            threshold_minutes = int(threshold_parts[0]) * 60 + int(threshold_parts[1])
+            arrival_minutes = int(arrival_parts[0]) * 60 + int(arrival_parts[1])
+            minutes_late = arrival_minutes - threshold_minutes
+
+            late_arrivals.append(
+                {
+                    "employee_id": record.employee_id,
+                    "person_name": record.person_name,
+                    "iin": record.iin,
+                    "person_type": record.person_type,
+                    "faculty": record.faculty,
+                    "first_entry_time": record.access_time,
+                    "first_entry_datetime": record.access_datetime,
+                    "minutes_late": minutes_late,
+                }
+            )
+
+        return late_arrivals

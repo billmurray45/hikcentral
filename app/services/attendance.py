@@ -559,6 +559,66 @@ class AttendanceService:
 
         return response
 
+    async def get_late_arrivals(
+        self, faculty_slug: str, date: str, threshold_time: str = "09:00:00"
+    ):
+        """
+        Получить список опоздавших по факультету
+
+        Args:
+            faculty_slug: Slug факультета (engineering, tourism, ...)
+            date: Дата в формате YYYY-MM-DD
+            threshold_time: Пороговое время в формате HH:MM:SS
+
+        Returns:
+            LateArrivalsResponse
+
+        Raises:
+            ValueError: Если факультет не найден или неверный формат даты/времени
+        """
+        from app.schemas import LateArrivalPerson, LateArrivalsResponse, get_faculty_name
+        import re
+
+        # Валидация даты
+        self._validate_date(date)
+
+        # Валидация времени (формат HH:MM:SS)
+        if not re.match(r"^\d{2}:\d{2}:\d{2}$", threshold_time):
+            raise ValueError("threshold_time must be in HH:MM:SS format")
+
+        # Получить название факультета
+        faculty_name = get_faculty_name(faculty_slug)
+        if not faculty_name:
+            raise ValueError(f"Faculty with slug '{faculty_slug}' not found")
+
+        # Проверка кэша
+        cache_key = f"late_arrivals:{faculty_slug}:{date}:{threshold_time}"
+        cached = await self._get_cached(cache_key)
+        if cached:
+            return LateArrivalsResponse(**cached)
+
+        # Получение из репозитория
+        late_data = await self.repo.get_late_arrivals(
+            faculty_name=faculty_name, date=date, threshold_time=threshold_time
+        )
+
+        # Конвертация в схемы
+        items = [LateArrivalPerson(**person) for person in late_data]
+
+        response = LateArrivalsResponse(
+            date=date,
+            threshold_time=threshold_time,
+            faculty_id=faculty_slug,
+            faculty_name=faculty_name,
+            total_late=len(items),
+            items=items,
+        )
+
+        # Кэширование (5 минут)
+        await self._set_cache(cache_key, response.model_dump(), ttl=settings.CACHE_DAILY_TTL)
+
+        return response
+
     # ==========================================
     # ПРИВАТНЫЕ МЕТОДЫ КЭШИРОВАНИЯ
     # ==========================================

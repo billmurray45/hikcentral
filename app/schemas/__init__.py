@@ -9,6 +9,8 @@ from .attendance import (
     PersonFilter,
     DailyAttendanceSummary,
     PersonHistoryResponse,
+    LateArrivalPerson,
+    LateArrivalsResponse,
 )
 
 from .common import (
@@ -43,6 +45,8 @@ __all__ = [
     "PersonFilter",
     "DailyAttendanceSummary",
     "PersonHistoryResponse",
+    "LateArrivalPerson",
+    "LateArrivalsResponse",
     # Common schemas
     "PaginationParams",
     "PaginatedResponse",
