@@ -145,6 +145,10 @@ class AttendanceRepository:
         if filters.person_group:
             query = query.where(AttendanceRecord.person_group.ilike(f"%{filters.person_group}%"))
 
+        # Фильтр по факультету
+        if filters.faculty:
+            query = query.where(AttendanceRecord.person_group.ilike(f"%{filters.faculty}%"))
+
         # Фильтр по конкретному человеку
         if filters.employee_id:
             query = query.where(AttendanceRecord.employee_id == filters.employee_id)
@@ -214,6 +218,9 @@ class AttendanceRepository:
 
         if filters.person_group:
             query = query.where(AttendanceRecord.person_group.ilike(f"%{filters.person_group}%"))
+
+        if filters.faculty:
+            query = query.where(AttendanceRecord.person_group.ilike(f"%{filters.faculty}%"))
 
         if filters.search:
             search_pattern = f"%{filters.search}%"
@@ -620,3 +627,254 @@ class AttendanceRepository:
 
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
+
+    # ==========================================
+    # РАБОТА С ФАКУЛЬТЕТАМИ
+    # ==========================================
+
+    async def get_faculties_list(
+        self, include_stats: bool = False, person_type: Optional[str] = None, date: Optional[str] = None
+    ) -> list[dict]:
+        """
+        Получить список всех факультетов с базовой статистикой
+
+        Args:
+            include_stats: Включить детальную статистику
+            person_type: Фильтр по типу пользователя
+            date: Дата для статистики
+
+        Returns:
+            Список словарей с данными о факультетах
+        """
+        # Базовый запрос
+        query = select(AttendanceRecord).where(AttendanceRecord.person_group.isnot(None))
+
+        # Фильтр по дате
+        if date:
+            query = query.where(AttendanceRecord.access_date == date)
+
+        # Выполнить запрос
+        result = await self.session.execute(query)
+        records = result.scalars().all()
+
+        # Группировать по факультетам
+        from collections import defaultdict
+
+        faculty_data = defaultdict(
+            lambda: {
+                "total_records": 0,
+                "students": 0,
+                "teachers": 0,
+                "employees": 0,
+                "other": 0,
+                "unique_persons": set(),
+                "last_activity": None,
+            }
+        )
+
+        for record in records:
+            faculty = record.faculty
+
+            if not faculty:
+                continue
+
+            # Фильтр по типу пользователя
+            if person_type:
+                record_type = record.person_type
+                # Группировать student_yu, student_yc, bachelor, master -> students
+                if person_type == "students":
+                    if record_type not in ["student_yu", "student_yc", "bachelor", "master"]:
+                        continue
+                elif person_type != record_type:
+                    continue
+
+            faculty_data[faculty]["total_records"] += 1
+
+            # Подсчет по типам
+            record_type = record.person_type
+            if record_type in ["student_yu", "student_yc", "bachelor", "master"]:
+                faculty_data[faculty]["students"] += 1
+            elif record_type == "teacher":
+                faculty_data[faculty]["teachers"] += 1
+            elif record_type == "employee":
+                faculty_data[faculty]["employees"] += 1
+            else:
+                faculty_data[faculty]["other"] += 1
+
+            # Уникальные персоны
+            if include_stats:
+                faculty_data[faculty]["unique_persons"].add(record.employee_id)
+
+            # Последняя активность
+            if include_stats:
+                if (
+                    faculty_data[faculty]["last_activity"] is None
+                    or record.access_datetime > faculty_data[faculty]["last_activity"]
+                ):
+                    faculty_data[faculty]["last_activity"] = record.access_datetime
+
+        # Преобразовать в список
+        faculties = []
+        for name, stats in faculty_data.items():
+            item = {"name": name, "total_records": stats["total_records"]}
+
+            if include_stats:
+                item.update(
+                    {
+                        "total_students": stats["students"],
+                        "total_teachers": stats["teachers"],
+                        "total_employees": stats["employees"],
+                        "total_other": stats["other"],
+                        "unique_persons": len(stats["unique_persons"]),
+                        "last_activity": stats["last_activity"],
+                    }
+                )
+
+            faculties.append(item)
+
+        return faculties
+
+    async def get_faculty_stats(
+        self, faculty_name: str, date_from: Optional[str] = None, date_to: Optional[str] = None
+    ) -> dict:
+        """
+        Получить детальную статистику факультета
+
+        Args:
+            faculty_name: Название факультета
+            date_from: Начало периода
+            date_to: Конец периода
+
+        Returns:
+            Словарь со статистикой
+        """
+        # Запрос для получения всех записей факультета
+        query = select(AttendanceRecord).where(AttendanceRecord.person_group.isnot(None))
+
+        # Фильтр по периоду
+        if date_from:
+            query = query.where(AttendanceRecord.access_date >= date_from)
+        if date_to:
+            query = query.where(AttendanceRecord.access_date <= date_to)
+
+        result = await self.session.execute(query)
+        all_records = result.scalars().all()
+
+        # Фильтровать только записи нужного факультета
+        faculty_records = [r for r in all_records if r.faculty == faculty_name]
+
+        if not faculty_records:
+            return {
+                "total_entries": 0,
+                "total_exits": 0,
+                "unique_persons": 0,
+                "by_type": {},
+                "by_day": [],
+                "peak_hour": None,
+                "peak_hour_count": 0,
+                "avg_daily_visits": 0.0,
+            }
+
+        # Подсчет статистики
+        from collections import defaultdict
+
+        total_entries = sum(1 for r in faculty_records if r.is_entry)
+        total_exits = sum(1 for r in faculty_records if r.is_exit)
+        unique_persons = len(set(r.employee_id for r in faculty_records))
+
+        # По типам
+        by_type = defaultdict(int)
+        for r in faculty_records:
+            type_name = r.person_type
+            # Группировать студентов
+            if type_name in ["student_yu", "student_yc"]:
+                by_type["students"] += 1
+            elif type_name in ["bachelor", "master"]:
+                by_type["students"] += 1
+            elif type_name == "teacher":
+                by_type["teachers"] += 1
+            elif type_name == "employee":
+                by_type["employees"] += 1
+            else:
+                by_type["other"] += 1
+
+        # По дням
+        by_day_dict = defaultdict(int)
+        for r in faculty_records:
+            by_day_dict[r.access_date] += 1
+
+        by_day = [{"date": date, "count": count} for date, count in sorted(by_day_dict.items())]
+
+        # Час пик
+        by_hour = defaultdict(int)
+        for r in faculty_records:
+            if r.access_time:
+                hour = r.access_time[:2]  # Первые 2 символа (час)
+                by_hour[hour] += 1
+
+        peak_hour = None
+        peak_hour_count = 0
+        if by_hour:
+            peak_hour, peak_hour_count = max(by_hour.items(), key=lambda x: x[1])
+
+        # Средние значения
+        days_count = len(by_day_dict) if by_day_dict else 1
+        avg_daily_visits = len(faculty_records) / days_count
+
+        return {
+            "total_entries": total_entries,
+            "total_exits": total_exits,
+            "unique_persons": unique_persons,
+            "by_type": dict(by_type),
+            "by_day": by_day,
+            "peak_hour": peak_hour,
+            "peak_hour_count": peak_hour_count,
+            "avg_daily_visits": round(avg_daily_visits, 2),
+        }
+
+    async def get_departments_list(self) -> list[dict]:
+        """
+        Получить список подразделений без факультета (для группировки)
+
+        Returns:
+            Список словарей с данными о подразделениях
+        """
+        # Получить все записи без факультета
+        query = select(AttendanceRecord).where(AttendanceRecord.person_group.isnot(None))
+
+        result = await self.session.execute(query)
+        all_records = result.scalars().all()
+
+        # Фильтровать записи без факультета
+        no_faculty_records = [r for r in all_records if not r.faculty]
+
+        # Группировать по первому уровню иерархии
+        from collections import defaultdict
+
+        departments = defaultdict(lambda: {"count": 0, "category": "other"})
+
+        for record in no_faculty_records:
+            # Извлечь первый уровень (до первого " > ")
+            parts = record.person_group.split(" > ")
+            if parts:
+                dept_name = parts[0].strip()
+
+                # Определить категорию
+                category = "other"
+                if "YC" in dept_name or "Обучающиеся YC" in dept_name:
+                    category = "college"
+                elif "Морская академия" in dept_name:
+                    category = "marine"
+                elif "Сотрудники YU" in dept_name or "Офис" in dept_name:
+                    category = "administrative"
+
+                departments[dept_name]["count"] += 1
+                departments[dept_name]["category"] = category
+
+        # Преобразовать в список
+        result_list = [
+            {"name": name, "total_records": data["count"], "category": data["category"]}
+            for name, data in departments.items()
+        ]
+
+        return result_list

@@ -128,6 +128,7 @@ class AttendanceFilter(BaseModel):
     # Фильтры по организации
     position: Optional[str] = Field(None, description="Поиск по должности")
     person_group: Optional[str] = Field(None, description="Поиск по группе")
+    faculty: Optional[str] = Field(None, description="Фильтр по факультету")
 
     # Фильтр по конкретному человеку
     employee_id: Optional[str] = Field(None, description="ID конкретного сотрудника")
@@ -265,6 +266,7 @@ class PersonFilter(BaseModel):
     person_type: Optional[str] = Field(None, description="Тип пользователя")
     position: Optional[str] = Field(None, description="Должность")
     person_group: Optional[str] = Field(None, description="Группа")
+    faculty: Optional[str] = Field(None, description="Фильтр по факультету")
     search: Optional[str] = Field(None, description="Поиск по имени, ИИН")
 
     # Пагинация

@@ -19,6 +19,18 @@ from .common import (
     HealthCheckResponse,
 )
 
+from .faculty import (
+    FacultyBasic,
+    FacultyWithStats,
+    FacultyListResponse,
+    FacultyStats,
+    FacultyFilter,
+    DepartmentBasic,
+    DepartmentListResponse,
+    get_faculty_slug,
+    get_faculty_name,
+)
+
 __all__ = [
     # Attendance schemas
     "AttendanceRecordResponse",
@@ -37,4 +49,14 @@ __all__ = [
     "SuccessResponse",
     "ErrorResponse",
     "HealthCheckResponse",
+    # Faculty schemas
+    "FacultyBasic",
+    "FacultyWithStats",
+    "FacultyListResponse",
+    "FacultyStats",
+    "FacultyFilter",
+    "DepartmentBasic",
+    "DepartmentListResponse",
+    "get_faculty_slug",
+    "get_faculty_name",
 ]
