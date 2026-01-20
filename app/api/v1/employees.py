@@ -31,20 +31,23 @@ router = APIRouter(prefix="/employees", tags=["Employees"])
 
     **Параметры:**
     - `position_type`: Фильтр по типу должности (Преподаватель/Руководитель/Специалист/и т.д.)
-    - `faculty_id`: Фильтр по ID факультета
+    - `faculty_id`: Фильтр по ID факультета (для преподавателей)
+    - `subdivision_id`: Фильтр по ID подразделения (для административного персонала)
     - `search`: Поиск по ФИО или IIN
 
     **Включает:**
     - ИИН
     - ФИО
     - Должность и тип должности
-    - Кафедра и факультет
+    - Кафедра и факультет (для преподавателей)
+    - Структурное подразделение (для административного персонала)
     - Контакты (email, телефон)
     """,
 )
 async def get_employees(
     position_type: Optional[str] = Query(None, description="Тип должности"),
     faculty_id: Optional[int] = Query(None, description="ID факультета"),
+    subdivision_id: Optional[int] = Query(None, description="ID подразделения"),
     search: Optional[str] = Query(None, description="Поиск по ФИО или IIN"),
     db: AsyncSession = Depends(get_db),
 ):
@@ -61,6 +64,9 @@ async def get_employees(
 
     if faculty_id is not None:
         query = query.where(PlatonusEmployee.faculty_id == faculty_id)
+
+    if subdivision_id is not None:
+        query = query.where(PlatonusEmployee.subdivision_id == subdivision_id)
 
     if search:
         search_pattern = f"%{search}%"
@@ -93,6 +99,8 @@ async def get_employees(
             cafedra=emp.cafedra_name,
             faculty=emp.faculty_name,
             faculty_id=emp.faculty_id,
+            subdivision=emp.subdivision_name,
+            subdivision_id=emp.subdivision_id,
             email=emp.email,
             phone=emp.phone,
         )

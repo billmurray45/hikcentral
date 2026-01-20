@@ -139,11 +139,15 @@ class PlatonusSyncService:
                                     f.FacultyID as faculty_id,
                                     f.facultyNameRU as faculty_name,
                                     t.mail,
-                                    t.mobilePhone
+                                    t.mobilePhone,
+                                    t.departmentid as subdivision_id,
+                                    ss.nameru as subdivision_name,
+                                    ss.subdivision_type
                                 FROM tutors t
                                 LEFT JOIN tutor_positions tp ON t.job_title_int = tp.id
                                 LEFT JOIN cafedras c ON t.CafedraID = c.cafedraID
                                 LEFT JOIN faculties f ON c.FacultyID = f.FacultyID
+                                LEFT JOIN structural_subdivision ss ON t.departmentid = ss.id
                                 WHERE t.iinplt = :iin
                                 LIMIT 1;
                             """)
@@ -170,6 +174,9 @@ class PlatonusSyncService:
                                     faculty_name=row[9],
                                     email=row[10],
                                     phone=row[11],
+                                    subdivision_id=row[12],
+                                    subdivision_name=row[13],
+                                    subdivision_type=row[14],
                                     synced_at=datetime.utcnow(),
                                 )
 

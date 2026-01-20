@@ -30,11 +30,16 @@ class PlatonusEmployee(Base):
         String(50), nullable=True, comment="Тип должности (Преподаватель/Руководитель/и т.д.)"
     )
 
-    # Структура
+    # Структура (для преподавателей)
     cafedra_id = Column(Integer, nullable=True, comment="ID кафедры")
     cafedra_name = Column(String(256), nullable=True, comment="Название кафедры")
     faculty_id = Column(Integer, nullable=True, comment="ID факультета")
     faculty_name = Column(String(256), nullable=True, comment="Название факультета")
+
+    # Структурное подразделение (для административного персонала)
+    subdivision_id = Column(Integer, nullable=True, comment="ID структурного подразделения")
+    subdivision_name = Column(String(256), nullable=True, comment="Название подразделения")
+    subdivision_type = Column(Integer, nullable=True, comment="Тип подразделения")
 
     # Контакты
     email = Column(String(512), nullable=True, comment="Email")

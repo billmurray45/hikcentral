@@ -16,9 +16,11 @@ class EmployeeBase(BaseModel):
     patronymic: Optional[str] = Field(None, description="Отчество")
     position: Optional[str] = Field(None, description="Должность")
     position_type: Optional[str] = Field(None, description="Тип должности (преподаватель/руководитель/специалист)")
-    cafedra: Optional[str] = Field(None, description="Кафедра")
-    faculty: Optional[str] = Field(None, description="Факультет")
+    cafedra: Optional[str] = Field(None, description="Кафедра (для преподавателей)")
+    faculty: Optional[str] = Field(None, description="Факультет (для преподавателей)")
     faculty_id: Optional[int] = Field(None, description="ID факультета")
+    subdivision: Optional[str] = Field(None, description="Структурное подразделение (для административного персонала)")
+    subdivision_id: Optional[int] = Field(None, description="ID структурного подразделения")
     email: Optional[str] = Field(None, description="Email")
     phone: Optional[str] = Field(None, description="Телефон")
 
