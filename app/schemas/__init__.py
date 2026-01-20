@@ -33,6 +33,11 @@ from .faculty import (
     get_faculty_name,
 )
 
+from .employees import (
+    EmployeeBase,
+    EmployeeListResponse,
+)
+
 __all__ = [
     # Attendance schemas
     "AttendanceRecordResponse",
@@ -63,4 +68,7 @@ __all__ = [
     "DepartmentListResponse",
     "get_faculty_slug",
     "get_faculty_name",
+    # Employee schemas
+    "EmployeeBase",
+    "EmployeeListResponse",
 ]
