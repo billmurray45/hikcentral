@@ -85,7 +85,7 @@ class PlatonusSyncService:
                 FROM attendance_records
                 WHERE iin IS NOT NULL
                 AND iin != ''
-                AND person_type != 'student'
+                AND person_group LIKE '%Сотрудники YU%'
                 ORDER BY iin;
             """)
 
