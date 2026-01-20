@@ -12,6 +12,7 @@ from sqlalchemy import create_engine
 import logging
 
 from app.models import AttendanceRecord, PlatonusEmployee
+from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -104,15 +105,15 @@ class PlatonusSyncService:
             error_count = 0
 
             with SSHTunnelForwarder(
-                ("77.245.103.155", 7244),
-                ssh_username="platonus_yu",
-                ssh_password="rCcSwNZe",
-                remote_bind_address=("localhost", 6080),
+                (settings.PLATONUS_SSH_HOST, settings.PLATONUS_SSH_PORT),
+                ssh_username=settings.PLATONUS_SSH_USER,
+                ssh_password=settings.PLATONUS_SSH_PASSWORD,
+                remote_bind_address=(settings.PLATONUS_DB_HOST, settings.PLATONUS_DB_PORT),
                 local_bind_address=("127.0.0.1", 0),
             ) as tunnel:
 
                 # Подключение к MySQL Platonus
-                db_url = f"mysql+pymysql://platonsel:KJh6H823hd8@127.0.0.1:{tunnel.local_bind_port}/nitro?charset=utf8mb4"
+                db_url = settings.platonus_db_url(tunnel.local_bind_port)
                 platonus_engine = create_engine(db_url, echo=False)
 
                 with platonus_engine.connect() as platonus_conn:

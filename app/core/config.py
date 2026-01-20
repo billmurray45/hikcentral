@@ -48,6 +48,19 @@ class Settings(BaseSettings):
     CACHE_SUMMARY_TTL: int = 600  # 10 минут
     CACHE_PERSONS_TTL: int = 86400  # 24 часа
 
+    # Platonus SSH Tunnel
+    PLATONUS_SSH_HOST: str
+    PLATONUS_SSH_PORT: int = 7244
+    PLATONUS_SSH_USER: str
+    PLATONUS_SSH_PASSWORD: str
+
+    # Platonus MySQL Database
+    PLATONUS_DB_HOST: str = "localhost"
+    PLATONUS_DB_PORT: int = 6080
+    PLATONUS_DB_NAME: str
+    PLATONUS_DB_USER: str
+    PLATONUS_DB_PASSWORD: str
+
     # CORS
     CORS_ORIGINS: list[str] = ["http://localhost:3000"]
     CORS_ALLOW_CREDENTIALS: bool = True
@@ -64,6 +77,13 @@ class Settings(BaseSettings):
         if self.REDIS_PASSWORD:
             return f"redis://:{self.REDIS_PASSWORD}@{self.REDIS_HOST}:{self.REDIS_PORT}/{self.REDIS_DB}"
         return f"redis://{self.REDIS_HOST}:{self.REDIS_PORT}/{self.REDIS_DB}"
+
+    def platonus_db_url(self, local_port: int) -> str:
+        """Получить URL для подключения к Platonus MySQL через SSH туннель"""
+        return (
+            f"mysql+pymysql://{self.PLATONUS_DB_USER}:{self.PLATONUS_DB_PASSWORD}@"
+            f"127.0.0.1:{local_port}/{self.PLATONUS_DB_NAME}?charset=utf8mb4"
+        )
 
 
 settings = Settings()
