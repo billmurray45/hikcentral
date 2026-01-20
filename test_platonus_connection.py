@@ -7,7 +7,7 @@ from sshtunnel import SSHTunnelForwarder
 from sqlalchemy import create_engine, text
 
 # Данные для подключения из .env
-PLATONUS_SSH_HOST = "77.245.103.155"
+PLATONUS_SSH_HOST = "platonus.yu.edu.kz"
 PLATONUS_SSH_PORT = 7244
 PLATONUS_SSH_USER = "platonus_yu"
 PLATONUS_SSH_PASSWORD = "rCcSwNZe"
