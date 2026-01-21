@@ -39,6 +39,8 @@ from .faculty import (
 from .employees import (
     EmployeeBase,
     EmployeeListResponse,
+    LateEmployeeSummary,
+    LateEmployeesResponse,
 )
 
 __all__ = [
@@ -77,4 +79,6 @@ __all__ = [
     # Employee schemas
     "EmployeeBase",
     "EmployeeListResponse",
+    "LateEmployeeSummary",
+    "LateEmployeesResponse",
 ]

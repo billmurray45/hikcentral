@@ -33,3 +33,41 @@ class EmployeeListResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+# ==========================================
+# Опоздавшие сотрудники
+# ==========================================
+
+
+class LateEmployeeSummary(BaseModel):
+    """Информация об опоздавшем сотруднике"""
+
+    # Данные сотрудника
+    iin: str = Field(..., description="ИИН")
+    firstname: str = Field(..., description="Имя")
+    lastname: str = Field(..., description="Фамилия")
+    patronymic: Optional[str] = Field(None, description="Отчество")
+    position: Optional[str] = Field(None, description="Должность")
+    position_type: Optional[str] = Field(None, description="Тип должности")
+
+    # Структура
+    cafedra: Optional[str] = Field(None, description="Кафедра (для преподавателей)")
+    faculty: Optional[str] = Field(None, description="Факультет (для преподавателей)")
+    faculty_id: Optional[int] = Field(None, description="ID факультета")
+    subdivision: Optional[str] = Field(None, description="Подразделение (для административного персонала)")
+    subdivision_id: Optional[int] = Field(None, description="ID подразделения")
+
+    # Данные об опоздании
+    first_entry_time: str = Field(..., description="Время первого входа (HH:MM:SS)")
+    first_entry_datetime: str = Field(..., description="Дата и время первого входа (ISO)")
+    minutes_late: int = Field(..., description="Количество минут опоздания")
+
+
+class LateEmployeesResponse(BaseModel):
+    """Ответ со списком опоздавших сотрудников"""
+
+    date: str = Field(..., description="Дата (YYYY-MM-DD)")
+    threshold_time: str = Field(..., description="Пороговое время (HH:MM:SS)")
+    total_late: int = Field(..., description="Всего опоздавших")
+    items: list[LateEmployeeSummary] = Field(default_factory=list, description="Список опоздавших сотрудников")
