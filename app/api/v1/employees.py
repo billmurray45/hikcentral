@@ -4,12 +4,19 @@ Employees API endpoints - получение списка сотрудников
 """
 
 from typing import Optional
-from fastapi import APIRouter, Query, Depends
-from sqlalchemy import select, func, or_
+from fastapi import APIRouter, Query, Depends, HTTPException
+from sqlalchemy import select, func, or_, text
 from sqlalchemy.ext.asyncio import AsyncSession
+from datetime import date, datetime
 
-from app.schemas import EmployeeBase, EmployeeListResponse
-from app.models import PlatonusEmployee
+from app.schemas import (
+    EmployeeBase,
+    EmployeeListResponse,
+    EmployeeAttendanceSummary,
+    EmployeeAttendanceListResponse,
+    EmployeeAttendanceRecord,
+)
+from app.models import PlatonusEmployee, AttendanceRecord
 from app.api.dependencies import get_db
 from app.services.platonus_sync import PlatonusSyncService
 
@@ -153,3 +160,164 @@ async def get_sync_stats(db: AsyncSession = Depends(get_db)):
     service = PlatonusSyncService(db)
     stats = await service.get_sync_stats()
     return stats
+
+
+@router.get(
+    "/attendance",
+    response_model=EmployeeAttendanceListResponse,
+    summary="Посещаемость сотрудников за день",
+    description="""
+    Получить данные о посещаемости сотрудников за определенный день.
+
+    **Источник данных:**
+    - История проходов из attendance_records (турникеты)
+    - Данные сотрудников из platonus_employees (должность, факультет, подразделение)
+
+    **Параметры фильтрации:**
+    - `date`: Дата (YYYY-MM-DD), по умолчанию сегодня
+    - `faculty_id`: ID факультета (для преподавателей)
+    - `subdivision_id`: ID подразделения (для административного персонала)
+    - `position_type`: Тип должности (Преподаватель/Административный персонал/и т.д.)
+    - `search`: Поиск по ФИО или IIN
+
+    **Возвращает:**
+    - Список сотрудников с их проходами за день
+    - Первый вход и последний выход
+    - Все проходы с временем и направлением
+    """,
+)
+async def get_employees_attendance(
+    date_param: Optional[str] = Query(None, alias="date", description="Дата (YYYY-MM-DD)"),
+    faculty_id: Optional[int] = Query(None, description="ID факультета"),
+    subdivision_id: Optional[int] = Query(None, description="ID подразделения"),
+    position_type: Optional[str] = Query(None, description="Тип должности"),
+    search: Optional[str] = Query(None, description="Поиск по ФИО или IIN"),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Получить посещаемость сотрудников за день
+    """
+
+    # Определить дату
+    if date_param:
+        try:
+            target_date = datetime.strptime(date_param, "%Y-%m-%d").date()
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Неверный формат даты. Используйте YYYY-MM-DD")
+    else:
+        target_date = date.today()
+
+    date_str = target_date.strftime("%Y-%m-%d")
+
+    # Получить всех сотрудников из Platonus с фильтрами
+    query = select(PlatonusEmployee)
+
+    # Применить фильтры
+    if faculty_id is not None:
+        query = query.where(PlatonusEmployee.faculty_id == faculty_id)
+
+    if subdivision_id is not None:
+        query = query.where(PlatonusEmployee.subdivision_id == subdivision_id)
+
+    if position_type:
+        query = query.where(PlatonusEmployee.position_type == position_type)
+
+    if search:
+        search_pattern = f"%{search}%"
+        query = query.where(
+            or_(
+                PlatonusEmployee.firstname.ilike(search_pattern),
+                PlatonusEmployee.lastname.ilike(search_pattern),
+                PlatonusEmployee.patronymic.ilike(search_pattern),
+                PlatonusEmployee.iin.ilike(search_pattern),
+            )
+        )
+
+    result = await db.execute(query)
+    employees = result.scalars().all()
+
+    # Если нет сотрудников - вернуть пустой результат
+    if not employees:
+        return EmployeeAttendanceListResponse(
+            date=date_str,
+            total=0,
+            items=[],
+        )
+
+    # Получить IIN'ы всех сотрудников
+    employee_iins = [emp.iin for emp in employees]
+
+    # Один запрос для получения всех записей attendance за день для этих сотрудников
+    attendance_query = select(AttendanceRecord).where(
+        AttendanceRecord.iin.in_(employee_iins),
+        AttendanceRecord.access_date == date_str
+    ).order_by(AttendanceRecord.iin, AttendanceRecord.access_datetime)
+
+    attendance_result = await db.execute(attendance_query)
+    all_attendance_records = attendance_result.scalars().all()
+
+    # Сгруппировать записи по IIN
+    attendance_by_iin = {}
+    for record in all_attendance_records:
+        if record.iin not in attendance_by_iin:
+            attendance_by_iin[record.iin] = []
+        attendance_by_iin[record.iin].append(record)
+
+    # Для каждого сотрудника создать сводку
+    employees_attendance = []
+
+    for emp in employees:
+        attendance_records = attendance_by_iin.get(emp.iin, [])
+
+        # Если нет записей - пропустить сотрудника
+        if not attendance_records:
+            continue
+
+        # Найти первый вход и последний выход
+        first_entry = None
+        last_exit = None
+
+        for record in attendance_records:
+            if record.direction == "Вход" and first_entry is None:
+                first_entry = record.access_time
+            if record.direction == "Выход":
+                last_exit = record.access_time
+
+        # Преобразовать записи в схемы
+        passes = [
+            EmployeeAttendanceRecord(
+                id=rec.id,
+                access_datetime=rec.access_datetime,
+                access_time=rec.access_time,
+                direction=rec.direction,
+                device_name=rec.device_name,
+            )
+            for rec in attendance_records
+        ]
+
+        # Создать сводку
+        employee_summary = EmployeeAttendanceSummary(
+            iin=emp.iin,
+            firstname=emp.firstname,
+            lastname=emp.lastname,
+            patronymic=emp.patronymic,
+            position=emp.position,
+            position_type=emp.position_type,
+            cafedra=emp.cafedra_name,
+            faculty=emp.faculty_name,
+            faculty_id=emp.faculty_id,
+            subdivision=emp.subdivision_name,
+            subdivision_id=emp.subdivision_id,
+            total_passes=len(attendance_records),
+            first_entry=first_entry,
+            last_exit=last_exit,
+            passes=passes,
+        )
+
+        employees_attendance.append(employee_summary)
+
+    return EmployeeAttendanceListResponse(
+        date=date_str,
+        total=len(employees_attendance),
+        items=employees_attendance,
+    )

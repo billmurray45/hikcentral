@@ -358,3 +358,56 @@ class LateArrivalsResponse(BaseModel):
     faculty_name: str = Field(..., description="Название факультета")
     total_late: int = Field(..., description="Всего опоздавших")
     items: list[LateArrivalPerson] = Field(default_factory=list, description="Список опоздавших")
+
+
+# ==========================================
+# Сотрудники с данными посещаемости (новое)
+# ==========================================
+
+
+class EmployeeAttendanceRecord(BaseModel):
+    """Одна запись прохода сотрудника"""
+
+    id: int = Field(..., description="ID записи")
+    access_datetime: str = Field(..., description="Дата и время прохода")
+    access_time: str = Field(..., description="Время прохода")
+    direction: str = Field(..., description="Направление (Вход/Выход)")
+    device_name: Optional[str] = Field(None, description="Название устройства")
+
+    class Config:
+        from_attributes = True
+
+
+class EmployeeAttendanceSummary(BaseModel):
+    """Сводка посещаемости сотрудника за день с данными из Platonus"""
+
+    # Данные сотрудника из Platonus
+    iin: str = Field(..., description="ИИН")
+    firstname: str = Field(..., description="Имя")
+    lastname: str = Field(..., description="Фамилия")
+    patronymic: Optional[str] = Field(None, description="Отчество")
+    position: Optional[str] = Field(None, description="Должность")
+    position_type: Optional[str] = Field(None, description="Тип должности")
+
+    # Структура
+    cafedra: Optional[str] = Field(None, description="Кафедра (для преподавателей)")
+    faculty: Optional[str] = Field(None, description="Факультет (для преподавателей)")
+    faculty_id: Optional[int] = Field(None, description="ID факультета")
+    subdivision: Optional[str] = Field(None, description="Подразделение (для административного персонала)")
+    subdivision_id: Optional[int] = Field(None, description="ID подразделения")
+
+    # Статистика за день
+    total_passes: int = Field(..., description="Всего проходов за день")
+    first_entry: Optional[str] = Field(None, description="Первый вход (время)")
+    last_exit: Optional[str] = Field(None, description="Последний выход (время)")
+
+    # Детальная история проходов
+    passes: list[EmployeeAttendanceRecord] = Field(default_factory=list, description="Список всех проходов")
+
+
+class EmployeeAttendanceListResponse(BaseModel):
+    """Ответ со списком посещаемости сотрудников"""
+
+    date: str = Field(..., description="Дата за которую выведены данные")
+    total: int = Field(..., description="Всего сотрудников")
+    items: list[EmployeeAttendanceSummary] = Field(default_factory=list, description="Список сотрудников с данными посещаемости")

@@ -17,15 +17,35 @@ from app.core.config import settings
 logger = logging.getLogger(__name__)
 
 
-def determine_position_type(position_name: Optional[str]) -> Optional[str]:
-    """Определить тип должности"""
+def determine_position_type(
+    position_name: Optional[str],
+    cafedra_id: Optional[int] = None,
+    subdivision_id: Optional[int] = None
+) -> Optional[str]:
+    """
+    Определить тип должности
+
+    Логика:
+    1. Если есть кафедра - это преподаватель (даже если должность не указана)
+    2. Если есть подразделение но нет кафедры - определяем по должности или "Административный персонал"
+    3. Если есть должность - определяем по ключевым словам
+    """
+
+    # Если есть кафедра - это точно преподаватель
+    if cafedra_id and cafedra_id > 0:
+        return "Преподаватель"
+
+    # Если нет должности
     if not position_name:
+        # Есть подразделение - административный персонал
+        if subdivision_id and subdivision_id > 0:
+            return "Административный персонал"
         return None
 
     position_lower = position_name.lower()
 
-    # Преподаватели
-    if any(word in position_lower for word in ["профессор", "доцент", "преподаватель"]):
+    # Преподаватели (по ключевым словам)
+    if any(word in position_lower for word in ["профессор", "доцент", "преподаватель", "лектор", "ассистент"]):
         return "Преподаватель"
 
     # Руководители
@@ -54,6 +74,10 @@ def determine_position_type(position_name: Optional[str]) -> Optional[str]:
     # Технический персонал
     if any(word in position_lower for word in ["лаборант", "инженер"]):
         return "Технический персонал"
+
+    # Административный персонал (если есть подразделение)
+    if subdivision_id and subdivision_id > 0:
+        return "Административный персонал"
 
     return "Прочие"
 
@@ -157,7 +181,12 @@ class PlatonusSyncService:
 
                             if row:
                                 # Данные найдены в Platonus
-                                position_type = determine_position_type(row[5])
+                                # Определить тип должности на основе должности, кафедры и подразделения
+                                position_type = determine_position_type(
+                                    position_name=row[5],
+                                    cafedra_id=row[6],
+                                    subdivision_id=row[12]
+                                )
 
                                 # Создать или обновить запись
                                 employee = PlatonusEmployee(
