@@ -1,7 +1,3 @@
-"""
-Модель для кеширования данных сотрудников из Platonus
-"""
-
 from datetime import datetime
 from sqlalchemy import Column, String, Integer, DateTime
 from app.core.database import Base

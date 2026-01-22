@@ -41,6 +41,15 @@ from .employees import (
     EmployeeListResponse,
     LateEmployeeSummary,
     LateEmployeesResponse,
+    PlatonusFaculty,
+    PlatonusFacultyListResponse,
+    PlatonusSubdivision,
+    PlatonusSubdivisionListResponse,
+    TopLateEmployee,
+    DivisionLateStats,
+    DailyLateStats,
+    LateTimeDistribution,
+    LateStatisticsResponse,
 )
 
 __all__ = [
@@ -81,4 +90,13 @@ __all__ = [
     "EmployeeListResponse",
     "LateEmployeeSummary",
     "LateEmployeesResponse",
+    "PlatonusFaculty",
+    "PlatonusFacultyListResponse",
+    "PlatonusSubdivision",
+    "PlatonusSubdivisionListResponse",
+    "TopLateEmployee",
+    "DivisionLateStats",
+    "DailyLateStats",
+    "LateTimeDistribution",
+    "LateStatisticsResponse",
 ]
