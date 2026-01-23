@@ -5,7 +5,7 @@ Employees API endpoints - получение списка сотрудников
 
 from typing import Optional
 from fastapi import APIRouter, Query, Depends, HTTPException
-from sqlalchemy import select, func, or_, text
+from sqlalchemy import select, func, or_, Integer
 from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import date, datetime, time, timedelta
 from collections import defaultdict
@@ -1030,8 +1030,8 @@ async def get_employee_attendance_history(
     # Статистика по направлениям
     stats_query = select(
         func.count(AttendanceRecord.id).label("total"),
-        func.sum(func.cast(AttendanceRecord.direction == "Вход", text("INTEGER"))).label("entries"),
-        func.sum(func.cast(AttendanceRecord.direction == "Выход", text("INTEGER"))).label("exits"),
+        func.sum(func.cast(AttendanceRecord.direction == "Вход", Integer)).label("entries"),
+        func.sum(func.cast(AttendanceRecord.direction == "Выход", Integer)).label("exits"),
         func.min(AttendanceRecord.access_date).label("first_date"),
         func.max(AttendanceRecord.access_date).label("last_date"),
     ).where(AttendanceRecord.iin == iin)
