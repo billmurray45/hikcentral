@@ -27,6 +27,8 @@ from app.schemas import (
     DailyLateStats,
     LateTimeDistribution,
     LateStatisticsResponse,
+    EmployeeAttendanceHistory,
+    EmployeeAttendanceHistoryRecord,
 )
 from app.models import PlatonusEmployee, AttendanceRecord
 from app.api.dependencies import get_db
@@ -934,6 +936,183 @@ async def get_late_statistics(
         by_division=division_list,
         by_day=daily_list,
         time_distribution=time_dist_list,
+    )
+
+
+# ==========================================
+# История посещаемости конкретного сотрудника
+# ==========================================
+
+
+@router.get(
+    "/{iin}/attendance",
+    response_model=EmployeeAttendanceHistory,
+    summary="История посещаемости сотрудника",
+    description="""
+    Получить полную историю посещаемости конкретного сотрудника по ИИН.
+
+    **Источник данных:**
+    - Данные сотрудника из platonus_employees
+    - История проходов из attendance_records
+
+    **Параметры фильтрации:**
+    - `date_from`: Дата начала периода (YYYY-MM-DD)
+    - `date_to`: Дата окончания периода (YYYY-MM-DD)
+    - Если даты не указаны, возвращаются все записи
+
+    **Пагинация:**
+    - `page`: Номер страницы (по умолчанию 1)
+    - `page_size`: Размер страницы (по умолчанию 50, макс 200)
+    - `sort_order`: Порядок сортировки по дате (asc/desc, по умолчанию desc - от новых к старым)
+
+    **Возвращает:**
+    - Информацию о сотруднике (ФИО, должность, факультет/подразделение)
+    - Статистику за период (всего записей, входов, выходов)
+    - Пагинированный список записей посещаемости
+    """,
+)
+async def get_employee_attendance_history(
+    iin: str,
+    date_from: Optional[str] = Query(None, description="Дата начала (YYYY-MM-DD)"),
+    date_to: Optional[str] = Query(None, description="Дата окончания (YYYY-MM-DD)"),
+    page: int = Query(1, ge=1, description="Номер страницы"),
+    page_size: int = Query(50, ge=1, le=200, description="Размер страницы"),
+    sort_order: str = Query("desc", description="Порядок сортировки (asc/desc)"),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Получить историю посещаемости конкретного сотрудника
+    """
+    # Проверка sort_order
+    if sort_order not in ["asc", "desc"]:
+        raise HTTPException(status_code=400, detail="sort_order должен быть 'asc' или 'desc'")
+
+    # ========================================
+    # 1. Найти сотрудника в Platonus
+    # ========================================
+    employee_query = select(PlatonusEmployee).where(PlatonusEmployee.iin == iin)
+    employee_result = await db.execute(employee_query)
+    employee = employee_result.scalar_one_or_none()
+
+    if not employee:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Сотрудник с ИИН {iin} не найден в базе Platonus"
+        )
+
+    # ========================================
+    # 2. Построить запрос для attendance_records
+    # ========================================
+    base_query = select(AttendanceRecord).where(AttendanceRecord.iin == iin)
+
+    # Применить фильтры по датам
+    if date_from:
+        try:
+            datetime.strptime(date_from, "%Y-%m-%d")
+            base_query = base_query.where(AttendanceRecord.access_date >= date_from)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="date_from должна быть в формате YYYY-MM-DD")
+
+    if date_to:
+        try:
+            datetime.strptime(date_to, "%Y-%m-%d")
+            base_query = base_query.where(AttendanceRecord.access_date <= date_to)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="date_to должна быть в формате YYYY-MM-DD")
+
+    # ========================================
+    # 3. Подсчитать общую статистику
+    # ========================================
+    # Всего записей
+    count_query = select(func.count()).select_from(base_query.subquery())
+    total_count = await db.scalar(count_query)
+
+    # Статистика по направлениям
+    stats_query = select(
+        func.count(AttendanceRecord.id).label("total"),
+        func.sum(func.cast(AttendanceRecord.direction == "Вход", text("INTEGER"))).label("entries"),
+        func.sum(func.cast(AttendanceRecord.direction == "Выход", text("INTEGER"))).label("exits"),
+        func.min(AttendanceRecord.access_date).label("first_date"),
+        func.max(AttendanceRecord.access_date).label("last_date"),
+    ).where(AttendanceRecord.iin == iin)
+
+    # Применить фильтры по датам к статистике
+    if date_from:
+        stats_query = stats_query.where(AttendanceRecord.access_date >= date_from)
+    if date_to:
+        stats_query = stats_query.where(AttendanceRecord.access_date <= date_to)
+
+    stats_result = await db.execute(stats_query)
+    stats_row = stats_result.one()
+
+    total_entries = stats_row.entries or 0
+    total_exits = stats_row.exits or 0
+    first_record_date = stats_row.first_date
+    last_record_date = stats_row.last_date
+
+    # ========================================
+    # 4. Получить пагинированные записи
+    # ========================================
+    offset = (page - 1) * page_size
+
+    # Применить сортировку
+    if sort_order == "desc":
+        records_query = base_query.order_by(AttendanceRecord.access_datetime.desc())
+    else:
+        records_query = base_query.order_by(AttendanceRecord.access_datetime.asc())
+
+    # Применить пагинацию
+    records_query = records_query.offset(offset).limit(page_size)
+
+    records_result = await db.execute(records_query)
+    attendance_records = records_result.scalars().all()
+
+    # Преобразовать в схемы
+    records_list = [
+        EmployeeAttendanceHistoryRecord(
+            id=rec.id,
+            access_datetime=rec.access_datetime,
+            access_date=rec.access_date,
+            access_time=rec.access_time,
+            direction=rec.direction,
+            device_name=rec.device_name,
+            card_number=rec.card_number,
+        )
+        for rec in attendance_records
+    ]
+
+    # ========================================
+    # 5. Вычислить количество страниц
+    # ========================================
+    total_pages = (total_count + page_size - 1) // page_size
+
+    # ========================================
+    # 6. Вернуть ответ
+    # ========================================
+    return EmployeeAttendanceHistory(
+        # Информация о сотруднике
+        iin=employee.iin,
+        firstname=employee.firstname,
+        lastname=employee.lastname,
+        patronymic=employee.patronymic,
+        position=employee.position,
+        position_type=employee.position_type,
+        cafedra=employee.cafedra_name,
+        faculty=employee.faculty_name,
+        faculty_id=employee.faculty_id,
+        subdivision=employee.subdivision_name,
+        subdivision_id=employee.subdivision_id,
+        # Статистика
+        total_records=total_count,
+        total_entries=total_entries,
+        total_exits=total_exits,
+        first_record_date=first_record_date,
+        last_record_date=last_record_date,
+        # Пагинация
+        page=page,
+        page_size=page_size,
+        total_pages=total_pages,
+        records=records_list,
     )
 
 

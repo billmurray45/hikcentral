@@ -210,3 +210,54 @@ class LateStatisticsResponse(BaseModel):
     time_distribution: list[LateTimeDistribution] = Field(
         default_factory=list, description="Распределение по времени опоздания"
     )
+
+
+# ==========================================
+# История посещаемости конкретного сотрудника
+# ==========================================
+
+
+class EmployeeAttendanceHistoryRecord(BaseModel):
+    """Одна запись прохода в истории сотрудника"""
+
+    id: int = Field(..., description="ID записи")
+    access_datetime: str = Field(..., description="Дата и время прохода (ISO)")
+    access_date: str = Field(..., description="Дата прохода (YYYY-MM-DD)")
+    access_time: str = Field(..., description="Время прохода (HH:MM:SS)")
+    direction: str = Field(..., description="Направление (Вход/Выход)")
+    device_name: Optional[str] = Field(None, description="Название устройства")
+    card_number: Optional[str] = Field(None, description="Номер карты")
+
+
+class EmployeeAttendanceHistory(BaseModel):
+    """История посещаемости конкретного сотрудника"""
+
+    # Информация о сотруднике
+    iin: str = Field(..., description="ИИН")
+    firstname: str = Field(..., description="Имя")
+    lastname: str = Field(..., description="Фамилия")
+    patronymic: Optional[str] = Field(None, description="Отчество")
+    position: Optional[str] = Field(None, description="Должность")
+    position_type: Optional[str] = Field(None, description="Тип должности")
+
+    # Структура
+    cafedra: Optional[str] = Field(None, description="Кафедра")
+    faculty: Optional[str] = Field(None, description="Факультет")
+    faculty_id: Optional[int] = Field(None, description="ID факультета")
+    subdivision: Optional[str] = Field(None, description="Подразделение")
+    subdivision_id: Optional[int] = Field(None, description="ID подразделения")
+
+    # Статистика за период
+    total_records: int = Field(..., description="Всего записей за период")
+    total_entries: int = Field(..., description="Всего входов")
+    total_exits: int = Field(..., description="Всего выходов")
+    first_record_date: Optional[str] = Field(None, description="Дата первой записи")
+    last_record_date: Optional[str] = Field(None, description="Дата последней записи")
+
+    # Пагинация и записи
+    page: int = Field(..., description="Текущая страница")
+    page_size: int = Field(..., description="Размер страницы")
+    total_pages: int = Field(..., description="Всего страниц")
+    records: list[EmployeeAttendanceHistoryRecord] = Field(
+        default_factory=list, description="Записи посещаемости"
+    )
