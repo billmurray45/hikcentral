@@ -29,6 +29,9 @@ class EmployeeListResponse(BaseModel):
     """Ответ со списком сотрудников"""
 
     total: int = Field(..., description="Всего сотрудников")
+    page: int = Field(..., description="Текущая страница")
+    page_size: int = Field(..., description="Размер страницы")
+    total_pages: int = Field(..., description="Всего страниц")
     items: list[EmployeeBase] = Field(default_factory=list, description="Список сотрудников")
 
     class Config:
@@ -70,6 +73,9 @@ class LateEmployeesResponse(BaseModel):
     date: str = Field(..., description="Дата (YYYY-MM-DD)")
     threshold_time: str = Field(..., description="Пороговое время (HH:MM:SS)")
     total_late: int = Field(..., description="Всего опоздавших")
+    page: int = Field(..., description="Текущая страница")
+    page_size: int = Field(..., description="Размер страницы")
+    total_pages: int = Field(..., description="Всего страниц")
     items: list[LateEmployeeSummary] = Field(default_factory=list, description="Список опоздавших сотрудников")
 
 
@@ -106,6 +112,9 @@ class PlatonusSubdivisionListResponse(BaseModel):
     """Список структурных подразделений из Platonus"""
 
     total: int = Field(..., description="Всего подразделений")
+    page: int = Field(..., description="Текущая страница")
+    page_size: int = Field(..., description="Размер страницы")
+    total_pages: int = Field(..., description="Всего страниц")
     items: list[PlatonusSubdivision] = Field(default_factory=list, description="Список подразделений")
 
 

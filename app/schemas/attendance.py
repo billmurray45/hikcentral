@@ -410,4 +410,7 @@ class EmployeeAttendanceListResponse(BaseModel):
 
     date: str = Field(..., description="Дата за которую выведены данные")
     total: int = Field(..., description="Всего сотрудников")
+    page: int = Field(..., description="Текущая страница")
+    page_size: int = Field(..., description="Размер страницы")
+    total_pages: int = Field(..., description="Всего страниц")
     items: list[EmployeeAttendanceSummary] = Field(default_factory=list, description="Список сотрудников с данными посещаемости")

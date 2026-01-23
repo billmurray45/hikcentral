@@ -48,11 +48,19 @@ router = APIRouter(prefix="/employees", tags=["Employees"])
     - Данные кешируются в таблице platonus_employees
     - Синхронизация: раз в неделю
 
-    **Параметры:**
+    **Фильтры:**
     - `position_type`: Фильтр по типу должности (Преподаватель/Руководитель/Специалист/и т.д.)
     - `faculty_id`: Фильтр по ID факультета (для преподавателей)
     - `subdivision_id`: Фильтр по ID подразделения (для административного персонала)
     - `search`: Поиск по ФИО или IIN
+
+    **Пагинация:**
+    - `page`: Номер страницы (default: 1, min: 1)
+    - `page_size`: Размер страницы (default: 20, min: 10, max: 100)
+
+    **Сортировка:**
+    - `sort_by`: Поле для сортировки (lastname, firstname, position_type)
+    - `sort_order`: Порядок сортировки (asc, desc)
 
     **Включает:**
     - ИИН
@@ -68,38 +76,65 @@ async def get_employees(
     faculty_id: Optional[int] = Query(None, description="ID факультета"),
     subdivision_id: Optional[int] = Query(None, description="ID подразделения"),
     search: Optional[str] = Query(None, description="Поиск по ФИО или IIN"),
+    page: int = Query(1, ge=1, description="Номер страницы"),
+    page_size: int = Query(20, ge=10, le=100, description="Размер страницы"),
+    sort_by: str = Query("lastname", description="Поле для сортировки (lastname, firstname, position_type)"),
+    sort_order: str = Query("asc", description="Порядок: asc или desc"),
     db: AsyncSession = Depends(get_db),
 ):
     """
     Получить список сотрудников из кеша
     """
 
-    # Построить запрос
+    # Построить базовый запрос для подсчета
+    count_query = select(func.count()).select_from(PlatonusEmployee)
+
+    # Построить запрос для данных
     query = select(PlatonusEmployee)
 
     # Фильтры
     if position_type:
         query = query.where(PlatonusEmployee.position_type == position_type)
+        count_query = count_query.where(PlatonusEmployee.position_type == position_type)
 
     if faculty_id is not None:
         query = query.where(PlatonusEmployee.faculty_id == faculty_id)
+        count_query = count_query.where(PlatonusEmployee.faculty_id == faculty_id)
 
     if subdivision_id is not None:
         query = query.where(PlatonusEmployee.subdivision_id == subdivision_id)
+        count_query = count_query.where(PlatonusEmployee.subdivision_id == subdivision_id)
 
     if search:
         search_pattern = f"%{search}%"
-        query = query.where(
-            or_(
-                PlatonusEmployee.firstname.ilike(search_pattern),
-                PlatonusEmployee.lastname.ilike(search_pattern),
-                PlatonusEmployee.patronymic.ilike(search_pattern),
-                PlatonusEmployee.iin.ilike(search_pattern),
-            )
+        search_filter = or_(
+            PlatonusEmployee.firstname.ilike(search_pattern),
+            PlatonusEmployee.lastname.ilike(search_pattern),
+            PlatonusEmployee.patronymic.ilike(search_pattern),
+            PlatonusEmployee.iin.ilike(search_pattern),
         )
+        query = query.where(search_filter)
+        count_query = count_query.where(search_filter)
+
+    # Подсчитать общее количество
+    total_count = await db.scalar(count_query)
+    total_count = total_count or 0
 
     # Сортировка
-    query = query.order_by(PlatonusEmployee.lastname, PlatonusEmployee.firstname)
+    sort_column = PlatonusEmployee.lastname
+    if sort_by == "firstname":
+        sort_column = PlatonusEmployee.firstname
+    elif sort_by == "position_type":
+        sort_column = PlatonusEmployee.position_type
+
+    if sort_order.lower() == "desc":
+        query = query.order_by(sort_column.desc(), PlatonusEmployee.lastname, PlatonusEmployee.firstname)
+    else:
+        query = query.order_by(sort_column, PlatonusEmployee.lastname, PlatonusEmployee.firstname)
+
+    # Пагинация
+    offset = (page - 1) * page_size
+    query = query.offset(offset).limit(page_size)
 
     # Выполнить запрос
     result = await db.execute(query)
@@ -126,7 +161,16 @@ async def get_employees(
         for emp in employees_db
     ]
 
-    return EmployeeListResponse(total=len(employees), items=employees)
+    # Вычислить количество страниц
+    total_pages = (total_count + page_size - 1) // page_size
+
+    return EmployeeListResponse(
+        total=total_count,
+        page=page,
+        page_size=page_size,
+        total_pages=total_pages,
+        items=employees,
+    )
 
 
 @router.post(
@@ -185,12 +229,16 @@ async def get_sync_stats(db: AsyncSession = Depends(get_db)):
     - История проходов из attendance_records (турникеты)
     - Данные сотрудников из platonus_employees (должность, факультет, подразделение)
 
-    **Параметры фильтрации:**
+    **Фильтры:**
     - `date`: Дата (YYYY-MM-DD), по умолчанию сегодня
     - `faculty_id`: ID факультета (для преподавателей)
     - `subdivision_id`: ID подразделения (для административного персонала)
     - `position_type`: Тип должности (Преподаватель/Административный персонал/и т.д.)
     - `search`: Поиск по ФИО или IIN
+
+    **Пагинация:**
+    - `page`: Номер страницы (default: 1, min: 1)
+    - `page_size`: Размер страницы (default: 20, min: 10, max: 100)
 
     **Возвращает:**
     - Список сотрудников с их проходами за день
@@ -204,6 +252,8 @@ async def get_employees_attendance(
     subdivision_id: Optional[int] = Query(None, description="ID подразделения"),
     position_type: Optional[str] = Query(None, description="Тип должности"),
     search: Optional[str] = Query(None, description="Поиск по ФИО или IIN"),
+    page: int = Query(1, ge=1, description="Номер страницы"),
+    page_size: int = Query(20, ge=10, le=100, description="Размер страницы"),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -221,45 +271,87 @@ async def get_employees_attendance(
 
     date_str = target_date.strftime("%Y-%m-%d")
 
-    # Получить всех сотрудников из Platonus с фильтрами
-    query = select(PlatonusEmployee)
+    # Шаг 1: Получить уникальные IIN'ы сотрудников с проходами в этот день
+    iin_query = select(AttendanceRecord.iin).where(
+        AttendanceRecord.access_date == date_str
+    ).distinct()
 
-    # Применить фильтры
-    if faculty_id is not None:
-        query = query.where(PlatonusEmployee.faculty_id == faculty_id)
+    iin_result = await db.execute(iin_query)
+    iins_with_attendance = [row[0] for row in iin_result.all()]
 
-    if subdivision_id is not None:
-        query = query.where(PlatonusEmployee.subdivision_id == subdivision_id)
-
-    if position_type:
-        query = query.where(PlatonusEmployee.position_type == position_type)
-
-    if search:
-        search_pattern = f"%{search}%"
-        query = query.where(
-            or_(
-                PlatonusEmployee.firstname.ilike(search_pattern),
-                PlatonusEmployee.lastname.ilike(search_pattern),
-                PlatonusEmployee.patronymic.ilike(search_pattern),
-                PlatonusEmployee.iin.ilike(search_pattern),
-            )
-        )
-
-    result = await db.execute(query)
-    employees = result.scalars().all()
-
-    # Если нет сотрудников - вернуть пустой результат
-    if not employees:
+    if not iins_with_attendance:
         return EmployeeAttendanceListResponse(
             date=date_str,
             total=0,
+            page=page,
+            page_size=page_size,
+            total_pages=0,
             items=[],
         )
 
-    # Получить IIN'ы всех сотрудников
+    # Шаг 2: Запрос для подсчета сотрудников с проходами + фильтры
+    count_query = select(func.count()).select_from(PlatonusEmployee).where(
+        PlatonusEmployee.iin.in_(iins_with_attendance)
+    )
+
+    # Шаг 3: Запрос для получения сотрудников с проходами + фильтры
+    query = select(PlatonusEmployee).where(
+        PlatonusEmployee.iin.in_(iins_with_attendance)
+    )
+
+    # Применить фильтры к обоим запросам
+    if faculty_id is not None:
+        query = query.where(PlatonusEmployee.faculty_id == faculty_id)
+        count_query = count_query.where(PlatonusEmployee.faculty_id == faculty_id)
+
+    if subdivision_id is not None:
+        query = query.where(PlatonusEmployee.subdivision_id == subdivision_id)
+        count_query = count_query.where(PlatonusEmployee.subdivision_id == subdivision_id)
+
+    if position_type:
+        query = query.where(PlatonusEmployee.position_type == position_type)
+        count_query = count_query.where(PlatonusEmployee.position_type == position_type)
+
+    if search:
+        search_pattern = f"%{search}%"
+        search_filter = or_(
+            PlatonusEmployee.firstname.ilike(search_pattern),
+            PlatonusEmployee.lastname.ilike(search_pattern),
+            PlatonusEmployee.patronymic.ilike(search_pattern),
+            PlatonusEmployee.iin.ilike(search_pattern),
+        )
+        query = query.where(search_filter)
+        count_query = count_query.where(search_filter)
+
+    # Подсчитать total
+    total_count = await db.scalar(count_query)
+    total_count = total_count or 0
+
+    # Сортировка и пагинация
+    query = query.order_by(PlatonusEmployee.lastname, PlatonusEmployee.firstname)
+    offset = (page - 1) * page_size
+    query = query.offset(offset).limit(page_size)
+
+    # Получить сотрудников для текущей страницы
+    result = await db.execute(query)
+    employees = result.scalars().all()
+
+    # Если нет сотрудников на этой странице
+    if not employees:
+        total_pages = (total_count + page_size - 1) // page_size
+        return EmployeeAttendanceListResponse(
+            date=date_str,
+            total=total_count,
+            page=page,
+            page_size=page_size,
+            total_pages=total_pages,
+            items=[],
+        )
+
+    # Получить IIN'ы сотрудников на текущей странице
     employee_iins = [emp.iin for emp in employees]
 
-    # Один запрос для получения всех записей attendance за день для этих сотрудников
+    # Получить attendance только для сотрудников текущей страницы
     attendance_query = select(AttendanceRecord).where(
         AttendanceRecord.iin.in_(employee_iins),
         AttendanceRecord.access_date == date_str
@@ -280,10 +372,6 @@ async def get_employees_attendance(
 
     for emp in employees:
         attendance_records = attendance_by_iin.get(emp.iin, [])
-
-        # Если нет записей - пропустить сотрудника
-        if not attendance_records:
-            continue
 
         # Найти первый вход и последний выход
         first_entry = None
@@ -328,9 +416,15 @@ async def get_employees_attendance(
 
         employees_attendance.append(employee_summary)
 
+    # Вычислить количество страниц
+    total_pages = (total_count + page_size - 1) // page_size
+
     return EmployeeAttendanceListResponse(
         date=date_str,
-        total=len(employees_attendance),
+        total=total_count,
+        page=page,
+        page_size=page_size,
+        total_pages=total_pages,
         items=employees_attendance,
     )
 
@@ -362,6 +456,8 @@ async def get_late_employees(
     date_param: Optional[str] = Query(None, alias="date", description="Дата (YYYY-MM-DD)"),
     faculty_id: Optional[int] = Query(None, description="ID факультета"),
     subdivision_id: Optional[int] = Query(None, description="ID подразделения"),
+    page: int = Query(1, ge=1, description="Номер страницы"),
+    page_size: int = Query(20, ge=10, le=100, description="Размер страницы"),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -411,6 +507,9 @@ async def get_late_employees(
             date=date_str,
             threshold_time=threshold_time,
             total_late=0,
+            page=page,
+            page_size=page_size,
+            total_pages=0,
             items=[],
         )
 
@@ -484,11 +583,22 @@ async def get_late_employees(
     # Сортировка по минутам опоздания (от большего к меньшему)
     late_employees.sort(key=lambda x: x.minutes_late, reverse=True)
 
+    # Пагинация в памяти
+    total_late = len(late_employees)
+    total_pages = (total_late + page_size - 1) // page_size if total_late > 0 else 0
+
+    start_idx = (page - 1) * page_size
+    end_idx = start_idx + page_size
+    paginated_employees = late_employees[start_idx:end_idx]
+
     return LateEmployeesResponse(
         date=date_str,
         threshold_time=threshold_time,
-        total_late=len(late_employees),
-        items=late_employees,
+        total_late=total_late,
+        page=page,
+        page_size=page_size,
+        total_pages=total_pages,
+        items=paginated_employees,
     )
 
 
@@ -911,16 +1021,22 @@ async def get_platonus_faculties(
 
     **Сортировка:**
     - По названию подразделения (A-Z)
+
+    **Пагинация:**
+    - page: номер страницы (по умолчанию 1)
+    - page_size: размер страницы (по умолчанию 20, мин 10, макс 100)
     """,
 )
 async def get_platonus_subdivisions(
+    page: int = Query(1, ge=1, description="Номер страницы"),
+    page_size: int = Query(20, ge=10, le=100, description="Размер страницы"),
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Получить список структурных подразделений из Platonus
+    Получить список структурных подразделений из Platonus с пагинацией
     """
-    # Запрос для получения уникальных подразделений с подсчётом сотрудников
-    query = (
+    # Подзапрос для группировки и подсчёта
+    subquery = (
         select(
             PlatonusEmployee.subdivision_id,
             PlatonusEmployee.subdivision_name,
@@ -936,7 +1052,25 @@ async def get_platonus_subdivisions(
             PlatonusEmployee.subdivision_name,
             PlatonusEmployee.subdivision_type,
         )
-        .order_by(PlatonusEmployee.subdivision_name)
+        .subquery()
+    )
+
+    # Запрос для подсчёта общего количества подразделений
+    count_query = select(func.count()).select_from(subquery)
+    total_count = await db.scalar(count_query)
+
+    # Запрос для получения подразделений с пагинацией
+    offset = (page - 1) * page_size
+    query = (
+        select(
+            subquery.c.subdivision_id,
+            subquery.c.subdivision_name,
+            subquery.c.subdivision_type,
+            subquery.c.employee_count,
+        )
+        .order_by(subquery.c.subdivision_name)
+        .offset(offset)
+        .limit(page_size)
     )
 
     result = await db.execute(query)
@@ -953,7 +1087,13 @@ async def get_platonus_subdivisions(
         for row in subdivisions_data
     ]
 
+    # Вычислить количество страниц
+    total_pages = (total_count + page_size - 1) // page_size
+
     return PlatonusSubdivisionListResponse(
-        total=len(subdivisions),
+        total=total_count,
+        page=page,
+        page_size=page_size,
+        total_pages=total_pages,
         items=subdivisions,
     )
