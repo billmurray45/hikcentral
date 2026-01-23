@@ -50,6 +50,8 @@ from .employees import (
     DailyLateStats,
     LateTimeDistribution,
     LateStatisticsResponse,
+    EmployeeAttendanceHistory,
+    EmployeeAttendanceHistoryRecord,
 )
 
 __all__ = [
@@ -99,4 +101,6 @@ __all__ = [
     "DailyLateStats",
     "LateTimeDistribution",
     "LateStatisticsResponse",
+    "EmployeeAttendanceHistory",
+    "EmployeeAttendanceHistoryRecord",
 ]
