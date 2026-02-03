@@ -54,6 +54,15 @@ from .employees import (
     EmployeeAttendanceHistoryRecord,
 )
 
+from .work_schedule import (
+    WorkScheduleRuleBase,
+    WorkScheduleRuleCreate,
+    WorkScheduleRuleUpdate,
+    WorkScheduleRuleResponse,
+    WorkScheduleRuleListResponse,
+    WorkScheduleRuleSummary,
+)
+
 __all__ = [
     # Attendance schemas
     "AttendanceRecordResponse",
@@ -103,4 +112,11 @@ __all__ = [
     "LateStatisticsResponse",
     "EmployeeAttendanceHistory",
     "EmployeeAttendanceHistoryRecord",
+    # Work Schedule schemas
+    "WorkScheduleRuleBase",
+    "WorkScheduleRuleCreate",
+    "WorkScheduleRuleUpdate",
+    "WorkScheduleRuleResponse",
+    "WorkScheduleRuleListResponse",
+    "WorkScheduleRuleSummary",
 ]

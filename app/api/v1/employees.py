@@ -33,6 +33,7 @@ from app.schemas import (
 from app.models import PlatonusEmployee, AttendanceRecord
 from app.api.dependencies import get_db
 from app.services.platonus_sync import PlatonusSyncService
+from app.services.work_schedule_service import WorkScheduleService
 
 router = APIRouter(prefix="/employees", tags=["Employees"])
 
@@ -52,6 +53,7 @@ router = APIRouter(prefix="/employees", tags=["Employees"])
 
     **Фильтры:**
     - `position_type`: Фильтр по типу должности (Преподаватель/Руководитель/Специалист/и т.д.)
+    - `position`: Фильтр по конкретной должности (Профессор, Доцент, Специалист и т.д.)
     - `faculty_id`: Фильтр по ID факультета (для преподавателей)
     - `subdivision_id`: Фильтр по ID подразделения (для административного персонала)
     - `search`: Поиск по ФИО или IIN
@@ -75,6 +77,7 @@ router = APIRouter(prefix="/employees", tags=["Employees"])
 )
 async def get_employees(
     position_type: Optional[str] = Query(None, description="Тип должности"),
+    position: Optional[str] = Query(None, description="Конкретная должность"),
     faculty_id: Optional[int] = Query(None, description="ID факультета"),
     subdivision_id: Optional[int] = Query(None, description="ID подразделения"),
     search: Optional[str] = Query(None, description="Поиск по ФИО или IIN"),
@@ -98,6 +101,10 @@ async def get_employees(
     if position_type:
         query = query.where(PlatonusEmployee.position_type == position_type)
         count_query = count_query.where(PlatonusEmployee.position_type == position_type)
+
+    if position:
+        query = query.where(PlatonusEmployee.position.ilike(f"%{position}%"))
+        count_query = count_query.where(PlatonusEmployee.position.ilike(f"%{position}%"))
 
     if faculty_id is not None:
         query = query.where(PlatonusEmployee.faculty_id == faculty_id)
@@ -236,6 +243,7 @@ async def get_sync_stats(db: AsyncSession = Depends(get_db)):
     - `faculty_id`: ID факультета (для преподавателей)
     - `subdivision_id`: ID подразделения (для административного персонала)
     - `position_type`: Тип должности (Преподаватель/Административный персонал/и т.д.)
+    - `position`: Конкретная должность (Профессор, Доцент, Специалист и т.д.)
     - `search`: Поиск по ФИО или IIN
 
     **Пагинация:**
@@ -253,6 +261,7 @@ async def get_employees_attendance(
     faculty_id: Optional[int] = Query(None, description="ID факультета"),
     subdivision_id: Optional[int] = Query(None, description="ID подразделения"),
     position_type: Optional[str] = Query(None, description="Тип должности"),
+    position: Optional[str] = Query(None, description="Конкретная должность"),
     search: Optional[str] = Query(None, description="Поиск по ФИО или IIN"),
     page: int = Query(1, ge=1, description="Номер страницы"),
     page_size: int = Query(20, ge=10, le=100, description="Размер страницы"),
@@ -313,6 +322,10 @@ async def get_employees_attendance(
     if position_type:
         query = query.where(PlatonusEmployee.position_type == position_type)
         count_query = count_query.where(PlatonusEmployee.position_type == position_type)
+
+    if position:
+        query = query.where(PlatonusEmployee.position.ilike(f"%{position}%"))
+        count_query = count_query.where(PlatonusEmployee.position.ilike(f"%{position}%"))
 
     if search:
         search_pattern = f"%{search}%"
@@ -444,17 +457,22 @@ async def get_employees_attendance(
 
     **Параметры фильтрации:**
     - `date`: Дата (YYYY-MM-DD), по умолчанию сегодня
-    - `threshold_time`: Пороговое время начала работы (HH:MM:SS), обязательный параметр
+    - `threshold_time`: Пороговое время по умолчанию (HH:MM:SS).
+      - Если `use_schedule_rules=false` - это время применяется ко всем
+      - Если `use_schedule_rules=true` - это время используется только для тех, у кого нет правила
+    - `use_schedule_rules`: Использовать правила из БД для каждой должности (default: true)
     - `faculty_id`: ID факультета (для преподавателей)
     - `subdivision_id`: ID подразделения (для административного персонала)
 
     **Возвращает:**
     - Список сотрудников, которые пришли после порогового времени
     - Время первого входа и количество минут опоздания для каждого
+    - Для каждого сотрудника применяется свое пороговое время (если use_schedule_rules=true)
     """,
 )
 async def get_late_employees(
-    threshold_time: str = Query(..., description="Пороговое время (HH:MM:SS)"),
+    threshold_time: str = Query("09:00:00", description="Пороговое время по умолчанию (HH:MM:SS)"),
+    use_schedule_rules: bool = Query(True, description="Использовать правила из БД"),
     date_param: Optional[str] = Query(None, alias="date", description="Дата (YYYY-MM-DD)"),
     faculty_id: Optional[int] = Query(None, description="ID факультета"),
     subdivision_id: Optional[int] = Query(None, description="ID подразделения"),
@@ -538,6 +556,13 @@ async def get_late_employees(
         if record.iin not in first_entry_by_iin:
             first_entry_by_iin[record.iin] = record
 
+    # Если используем правила из БД - загрузить их один раз
+    schedule_service = None
+    active_rules = []
+    if use_schedule_rules:
+        schedule_service = WorkScheduleService(db)
+        active_rules = await schedule_service.load_active_rules()
+
     # Для каждого сотрудника проверить опоздание
     late_employees = []
 
@@ -555,10 +580,19 @@ async def get_late_employees(
             # Если формат времени неверный - пропустить
             continue
 
+        # Получить пороговое время для этого сотрудника
+        if use_schedule_rules:
+            # Передаем entry_time для определения смены (например, для охранников)
+            employee_threshold = schedule_service.get_threshold_for_employee(
+                emp, active_rules, threshold_time_obj, entry_time=entry_time_obj
+            )
+        else:
+            employee_threshold = threshold_time_obj
+
         # Сравнить с пороговым временем
-        if entry_time_obj > threshold_time_obj:
+        if entry_time_obj > employee_threshold:
             # Вычислить минуты опоздания
-            threshold_datetime = datetime.combine(target_date, threshold_time_obj)
+            threshold_datetime = datetime.combine(target_date, employee_threshold)
             entry_datetime = datetime.combine(target_date, entry_time_obj)
             minutes_late = int((entry_datetime - threshold_datetime).total_seconds() / 60)
 
