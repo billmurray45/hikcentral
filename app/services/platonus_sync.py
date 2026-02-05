@@ -109,6 +109,7 @@ class PlatonusSyncService:
                 FROM attendance_records
                 WHERE iin IS NOT NULL
                 AND iin != ''
+                AND iin ~ '^[0-9]{12}$'
                 AND person_group LIKE '%Сотрудники YU%'
                 ORDER BY iin;
             """)
@@ -144,8 +145,9 @@ class PlatonusSyncService:
                     logger.info("Подключено к Platonus")
 
                     # Для каждого IIN получить данные из Platonus
+                    batch_size = 50
                     for idx, (iin, person_name) in enumerate(hikcentral_employees, 1):
-                        if idx % 50 == 0:
+                        if idx % batch_size == 0:
                             logger.info(f"Обработано {idx}/{len(hikcentral_employees)}...")
 
                         try:
@@ -188,6 +190,20 @@ class PlatonusSyncService:
                                     subdivision_id=row[12]
                                 )
 
+                                # Логика для subdivision: только для сотрудников БЕЗ кафедры
+                                # Преподаватели имеют faculty_id/cafedra_id, subdivision_id должен быть NULL
+                                cafedra_id = row[6]
+                                if cafedra_id and cafedra_id > 0:
+                                    # Это преподаватель - subdivision не нужен
+                                    subdivision_id = None
+                                    subdivision_name = None
+                                    subdivision_type = None
+                                else:
+                                    # Это административный персонал - используем subdivision
+                                    subdivision_id = row[12]
+                                    subdivision_name = row[13]
+                                    subdivision_type = row[14]
+
                                 # Создать или обновить запись
                                 employee = PlatonusEmployee(
                                     iin=iin,
@@ -203,9 +219,9 @@ class PlatonusSyncService:
                                     faculty_name=row[9],
                                     email=row[10],
                                     phone=row[11],
-                                    subdivision_id=row[12],
-                                    subdivision_name=row[13],
-                                    subdivision_type=row[14],
+                                    subdivision_id=subdivision_id,
+                                    subdivision_name=subdivision_name,
+                                    subdivision_type=subdivision_type,
                                     synced_at=datetime.utcnow(),
                                 )
 
@@ -218,12 +234,32 @@ class PlatonusSyncService:
                                 logger.warning(f"Сотрудник с IIN {iin} ({person_name}) не найден в Platonus")
                                 not_found_count += 1
 
+                            # Commit каждые batch_size записей
+                            if idx % batch_size == 0:
+                                try:
+                                    await self.db.commit()
+                                    logger.info(f"Commit батча на {idx} записях")
+                                except Exception as commit_error:
+                                    logger.error(f"Ошибка при commit батча: {commit_error}")
+                                    await self.db.rollback()
+                                    error_count += batch_size
+
                         except Exception as e:
                             logger.error(f"Ошибка обработки IIN {iin}: {e}")
                             error_count += 1
+                            # При ошибке откатываем транзакцию
+                            try:
+                                await self.db.rollback()
+                            except Exception:
+                                pass
 
-            # Commit всех изменений
-            await self.db.commit()
+            # Финальный commit для оставшихся записей
+            try:
+                await self.db.commit()
+                logger.info("Финальный commit выполнен")
+            except Exception as e:
+                logger.error(f"Ошибка при финальном commit: {e}")
+                await self.db.rollback()
 
             logger.info(
                 f"Синхронизация завершена. Синхронизировано: {synced_count}, "
