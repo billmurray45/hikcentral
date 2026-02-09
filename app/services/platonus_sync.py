@@ -10,6 +10,7 @@ from sqlalchemy import select, text, delete
 from sshtunnel import SSHTunnelForwarder
 from sqlalchemy import create_engine
 import logging
+import asyncio
 
 from app.models import AttendanceRecord, PlatonusEmployee
 from app.core.config import settings
@@ -129,29 +130,48 @@ class PlatonusSyncService:
             not_found_count = 0
             error_count = 0
 
-            with SSHTunnelForwarder(
-                (settings.PLATONUS_SSH_HOST, settings.PLATONUS_SSH_PORT),
-                ssh_username=settings.PLATONUS_SSH_USER,
-                ssh_password=settings.PLATONUS_SSH_PASSWORD,
-                remote_bind_address=(settings.PLATONUS_DB_HOST, settings.PLATONUS_DB_PORT),
-                local_bind_address=("127.0.0.1", 0),
-            ) as tunnel:
+            tunnel = None
+            platonus_engine = None
+            platonus_conn = None
+
+            try:
+                # Создать SSH туннель (синхронная операция)
+                def create_and_start_tunnel():
+                    t = SSHTunnelForwarder(
+                        (settings.PLATONUS_SSH_HOST, settings.PLATONUS_SSH_PORT),
+                        ssh_username=settings.PLATONUS_SSH_USER,
+                        ssh_password=settings.PLATONUS_SSH_PASSWORD,
+                        remote_bind_address=(settings.PLATONUS_DB_HOST, settings.PLATONUS_DB_PORT),
+                        local_bind_address=("127.0.0.1", 0),
+                        allow_agent=False,
+                        host_pkey_directories=[],
+                        compression=True,
+                        set_keepalive=30,
+                    )
+                    t.start()
+                    return t
+
+                # Запустить в отдельном потоке
+                loop = asyncio.get_event_loop()
+                tunnel = await loop.run_in_executor(None, create_and_start_tunnel)
+                logger.info(f"SSH туннель установлен на порту {tunnel.local_bind_port}")
 
                 # Подключение к MySQL Platonus
                 db_url = settings.platonus_db_url(tunnel.local_bind_port)
                 platonus_engine = create_engine(db_url, echo=False)
 
-                with platonus_engine.connect() as platonus_conn:
-                    logger.info("Подключено к Platonus")
+                platonus_conn = platonus_engine.connect()
+                logger.info("Подключено к Platonus")
 
-                    # Для каждого IIN получить данные из Platonus
-                    batch_size = 50
-                    for idx, (iin, person_name) in enumerate(hikcentral_employees, 1):
+                # Для каждого IIN получить данные из Platonus
+                batch_size = 50
+                for idx, (iin, person_name) in enumerate(hikcentral_employees, 1):
                         if idx % batch_size == 0:
                             logger.info(f"Обработано {idx}/{len(hikcentral_employees)}...")
 
                         try:
                             # Запрос к Platonus
+                            # ВАЖНО: Берем только основную ставку (RATE = 1)
                             platonus_query = text("""
                                 SELECT
                                     t.TutorID,
@@ -175,6 +195,7 @@ class PlatonusSyncService:
                                 LEFT JOIN faculties f ON c.FacultyID = f.FacultyID
                                 LEFT JOIN structural_subdivision ss ON t.departmentid = ss.id
                                 WHERE t.iinplt = :iin
+                                  AND t.RATE = 1
                                 LIMIT 1;
                             """)
 
@@ -253,26 +274,51 @@ class PlatonusSyncService:
                             except Exception:
                                 pass
 
-            # Финальный commit для оставшихся записей
-            try:
-                await self.db.commit()
-                logger.info("Финальный commit выполнен")
-            except Exception as e:
-                logger.error(f"Ошибка при финальном commit: {e}")
-                await self.db.rollback()
+                # Финальный commit для оставшихся записей
+                try:
+                    await self.db.commit()
+                    logger.info("Финальный commit выполнен")
+                except Exception as e:
+                    logger.error(f"Ошибка при финальном commit: {e}")
+                    await self.db.rollback()
 
-            logger.info(
-                f"Синхронизация завершена. Синхронизировано: {synced_count}, "
-                f"Не найдено: {not_found_count}, Ошибок: {error_count}"
-            )
+                logger.info(
+                    f"Синхронизация завершена. Синхронизировано: {synced_count}, "
+                    f"Не найдено: {not_found_count}, Ошибок: {error_count}"
+                )
 
-            return {
-                "status": "success",
-                "synced": synced_count,
-                "not_found": not_found_count,
-                "errors": error_count,
-                "total": len(hikcentral_employees),
-            }
+                return {
+                    "status": "success",
+                    "synced": synced_count,
+                    "not_found": not_found_count,
+                    "errors": error_count,
+                    "total": len(hikcentral_employees),
+                }
+
+            finally:
+                # Закрыть все ресурсы
+                if platonus_conn:
+                    try:
+                        platonus_conn.close()
+                        logger.info("Platonus connection закрыто")
+                    except Exception as e:
+                        logger.error(f"Ошибка при закрытии connection: {e}")
+
+                if platonus_engine:
+                    try:
+                        platonus_engine.dispose()
+                        logger.info("Platonus engine закрыт")
+                    except Exception as e:
+                        logger.error(f"Ошибка при закрытии engine: {e}")
+
+                if tunnel:
+                    try:
+                        # Закрыть туннель в отдельном потоке
+                        loop = asyncio.get_event_loop()
+                        await loop.run_in_executor(None, tunnel.stop)
+                        logger.info("SSH туннель закрыт")
+                    except Exception as e:
+                        logger.error(f"Ошибка при закрытии туннеля: {e}")
 
         except Exception as e:
             logger.error(f"Ошибка синхронизации: {e}", exc_info=True)
