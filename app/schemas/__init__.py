@@ -39,6 +39,8 @@ from .faculty import (
 from .employees import (
     EmployeeBase,
     EmployeeListResponse,
+    FirstLessonInfo,
+    WorkScheduleRuleInfo,
     LateEmployeeSummary,
     LateEmployeesResponse,
     PlatonusFaculty,
@@ -61,6 +63,18 @@ from .work_schedule import (
     WorkScheduleRuleResponse,
     WorkScheduleRuleListResponse,
     WorkScheduleRuleSummary,
+)
+
+from .teacher_schedule import (
+    TeacherScheduleBase,
+    TeacherScheduleWithTeacher,
+    TeacherScheduleDayResponse,
+    TeacherScheduleWeekResponse,
+    TeacherScheduleListResponse,
+    TeacherScheduleSyncStats,
+    TeacherScheduleSyncResponse,
+    TeacherScheduleSearchResult,
+    TeacherScheduleStatistics,
 )
 
 __all__ = [
@@ -99,6 +113,8 @@ __all__ = [
     # Employee schemas
     "EmployeeBase",
     "EmployeeListResponse",
+    "FirstLessonInfo",
+    "WorkScheduleRuleInfo",
     "LateEmployeeSummary",
     "LateEmployeesResponse",
     "PlatonusFaculty",
@@ -119,4 +135,14 @@ __all__ = [
     "WorkScheduleRuleResponse",
     "WorkScheduleRuleListResponse",
     "WorkScheduleRuleSummary",
+    # Teacher Schedule schemas
+    "TeacherScheduleBase",
+    "TeacherScheduleWithTeacher",
+    "TeacherScheduleDayResponse",
+    "TeacherScheduleWeekResponse",
+    "TeacherScheduleListResponse",
+    "TeacherScheduleSyncStats",
+    "TeacherScheduleSyncResponse",
+    "TeacherScheduleSearchResult",
+    "TeacherScheduleStatistics",
 ]

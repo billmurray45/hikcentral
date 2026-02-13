@@ -34,6 +34,7 @@ from app.models import PlatonusEmployee, AttendanceRecord
 from app.api.dependencies import get_db
 from app.services.platonus_sync import PlatonusSyncService
 from app.services.work_schedule_service import WorkScheduleService
+from app.services.late_arrival_service import LateArrivalService
 
 router = APIRouter(prefix="/employees", tags=["Employees"])
 
@@ -451,31 +452,35 @@ async def get_employees_attendance(
     description="""
     Получить список опоздавших сотрудников за определенный день.
 
-    **Источник данных:**
-    - История проходов из attendance_records (турникеты)
-    - Данные сотрудников из platonus_employees (должность, факультет, подразделение)
+    **Логика опозданий:**
+    - **Для преподавателей**: Опоздание на первый урок из расписания (teacher_schedule)
+      - Если первый урок в 11:00, а пришел в 11:05 → опоздал на 5 минут
+      - Если нет расписания в этот день → НЕ считается опозданием
 
-    **Параметры фильтрации:**
-    - `date`: Дата (YYYY-MM-DD), по умолчанию сегодня
-    - `threshold_time`: Пороговое время по умолчанию (HH:MM:SS).
-      - Если `use_schedule_rules=false` - это время применяется ко всем
-      - Если `use_schedule_rules=true` - это время используется только для тех, у кого нет правила
-    - `use_schedule_rules`: Использовать правила из БД для каждой должности (default: true)
-    - `faculty_id`: ID факультета (для преподавателей)
-    - `subdivision_id`: ID подразделения (для административного персонала)
+    - **Для остальных сотрудников**: Опоздание по правилам (work_schedule_rules)
+      - Для каждого сотрудника ищется применимое правило по должности/подразделению
+      - Если правила нет → НЕ считается опозданием
 
-    **Возвращает:**
-    - Список сотрудников, которые пришли после порогового времени
-    - Время первого входа и количество минут опоздания для каждого
-    - Для каждого сотрудника применяется свое пороговое время (если use_schedule_rules=true)
+    **Параметры:**
+    - `date`: Дата для проверки (YYYY-MM-DD). Если не указана - берется сегодняшняя дата
+    - `faculty_id`: Фильтр по факультету (для преподавателей)
+    - `subdivision_id`: Фильтр по подразделению
+    - `position_type`: Фильтр по типу должности
+    - `page`: Номер страницы (default: 1)
+    - `page_size`: Размер страницы (default: 20, min: 10, max: 100)
+
+    **Response содержит:**
+    - `late_type`: "lesson" (опоздание на урок) или "work_schedule" (по правилу)
+    - `expected_time`: Ожидаемое время (начало урока или работы)
+    - `first_lesson`: Детали первого урока (для преподавателей)
+    - `work_schedule_rule`: Детали правила (для остальных)
     """,
 )
 async def get_late_employees(
-    threshold_time: str = Query("09:00:00", description="Пороговое время по умолчанию (HH:MM:SS)"),
-    use_schedule_rules: bool = Query(True, description="Использовать правила из БД"),
     date_param: Optional[str] = Query(None, alias="date", description="Дата (YYYY-MM-DD)"),
     faculty_id: Optional[int] = Query(None, description="ID факультета"),
     subdivision_id: Optional[int] = Query(None, description="ID подразделения"),
+    position_type: Optional[str] = Query(None, description="Тип должности"),
     page: int = Query(1, ge=1, description="Номер страницы"),
     page_size: int = Query(20, ge=10, le=100, description="Размер страницы"),
     db: AsyncSession = Depends(get_db),
@@ -493,149 +498,18 @@ async def get_late_employees(
     else:
         target_date = date.today()
 
-    date_str = target_date.strftime("%Y-%m-%d")
-
-    # Парсинг порогового времени
-    try:
-        threshold_time_obj = datetime.strptime(threshold_time, "%H:%M:%S").time()
-    except ValueError:
-        try:
-            # Попробовать формат HH:MM
-            threshold_time_obj = datetime.strptime(threshold_time, "%H:%M").time()
-            threshold_time = threshold_time_obj.strftime("%H:%M:%S")
-        except ValueError:
-            raise HTTPException(
-                status_code=400, detail="Неверный формат времени. Используйте HH:MM:SS или HH:MM"
-            )
-
-    # Получить всех сотрудников из Platonus с фильтрами
-    query = select(PlatonusEmployee)
-
-    # Применить фильтры
-    if faculty_id is not None:
-        query = query.where(PlatonusEmployee.faculty_id == faculty_id)
-
-    if subdivision_id is not None:
-        query = query.where(PlatonusEmployee.subdivision_id == subdivision_id)
-
-    result = await db.execute(query)
-    employees = result.scalars().all()
-
-    # Если нет сотрудников - вернуть пустой результат
-    if not employees:
-        return LateEmployeesResponse(
-            date=date_str,
-            threshold_time=threshold_time,
-            total_late=0,
-            page=page,
-            page_size=page_size,
-            total_pages=0,
-            items=[],
-        )
-
-    # Получить IIN'ы всех сотрудников
-    employee_iins = [emp.iin for emp in employees]
-
-    # Один запрос для получения всех записей attendance за день (только входы)
-    attendance_query = (
-        select(AttendanceRecord)
-        .where(
-            AttendanceRecord.iin.in_(employee_iins),
-            AttendanceRecord.access_date == date_str,
-            AttendanceRecord.direction == "Вход",
-        )
-        .order_by(AttendanceRecord.iin, AttendanceRecord.access_datetime)
-    )
-
-    attendance_result = await db.execute(attendance_query)
-    all_attendance_records = attendance_result.scalars().all()
-
-    # Сгруппировать записи по IIN (нам нужен только первый вход для каждого)
-    first_entry_by_iin = {}
-    for record in all_attendance_records:
-        if record.iin not in first_entry_by_iin:
-            first_entry_by_iin[record.iin] = record
-
-    # Если используем правила из БД - загрузить их один раз
-    schedule_service = None
-    active_rules = []
-    if use_schedule_rules:
-        schedule_service = WorkScheduleService(db)
-        active_rules = await schedule_service.load_active_rules()
-
-    # Для каждого сотрудника проверить опоздание
-    late_employees = []
-
-    for emp in employees:
-        first_entry_record = first_entry_by_iin.get(emp.iin)
-
-        # Если нет записей о входе - пропустить сотрудника
-        if not first_entry_record:
-            continue
-
-        # Получить время первого входа
-        try:
-            entry_time_obj = datetime.strptime(first_entry_record.access_time, "%H:%M:%S").time()
-        except ValueError:
-            # Если формат времени неверный - пропустить
-            continue
-
-        # Получить пороговое время для этого сотрудника
-        if use_schedule_rules:
-            # Передаем entry_time для определения смены (например, для охранников)
-            employee_threshold = schedule_service.get_threshold_for_employee(
-                emp, active_rules, threshold_time_obj, entry_time=entry_time_obj
-            )
-        else:
-            employee_threshold = threshold_time_obj
-
-        # Сравнить с пороговым временем
-        if entry_time_obj > employee_threshold:
-            # Вычислить минуты опоздания
-            threshold_datetime = datetime.combine(target_date, employee_threshold)
-            entry_datetime = datetime.combine(target_date, entry_time_obj)
-            minutes_late = int((entry_datetime - threshold_datetime).total_seconds() / 60)
-
-            # Создать запись об опоздавшем
-            late_employee = LateEmployeeSummary(
-                iin=emp.iin,
-                firstname=emp.firstname,
-                lastname=emp.lastname,
-                patronymic=emp.patronymic,
-                position=emp.position,
-                position_type=emp.position_type,
-                cafedra=emp.cafedra_name,
-                faculty=emp.faculty_name,
-                faculty_id=emp.faculty_id,
-                subdivision=emp.subdivision_name,
-                subdivision_id=emp.subdivision_id,
-                first_entry_time=first_entry_record.access_time,
-                first_entry_datetime=first_entry_record.access_datetime,
-                minutes_late=minutes_late,
-            )
-
-            late_employees.append(late_employee)
-
-    # Сортировка по минутам опоздания (от большего к меньшему)
-    late_employees.sort(key=lambda x: x.minutes_late, reverse=True)
-
-    # Пагинация в памяти
-    total_late = len(late_employees)
-    total_pages = (total_late + page_size - 1) // page_size if total_late > 0 else 0
-
-    start_idx = (page - 1) * page_size
-    end_idx = start_idx + page_size
-    paginated_employees = late_employees[start_idx:end_idx]
-
-    return LateEmployeesResponse(
-        date=date_str,
-        threshold_time=threshold_time,
-        total_late=total_late,
+    # Использовать LateArrivalService
+    late_service = LateArrivalService(db)
+    result = await late_service.get_late_arrivals(
+        target_date=target_date,
+        faculty_id=faculty_id,
+        subdivision_id=subdivision_id,
+        position_type=position_type,
         page=page,
         page_size=page_size,
-        total_pages=total_pages,
-        items=paginated_employees,
     )
+
+    return LateEmployeesResponse(**result)
 
 
 @router.get(

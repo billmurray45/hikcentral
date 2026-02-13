@@ -43,6 +43,24 @@ class EmployeeListResponse(BaseModel):
 # ==========================================
 
 
+class FirstLessonInfo(BaseModel):
+    """Информация о первом уроке (для преподавателей)"""
+
+    subject: str = Field(..., description="Название предмета")
+    group: str = Field(..., description="Группа")
+    time_range: str = Field(..., description="Время урока (HH:MM-HH:MM)")
+    auditory: Optional[str] = Field(None, description="Аудитория")
+
+
+class WorkScheduleRuleInfo(BaseModel):
+    """Информация о правиле рабочего времени (для административного персонала)"""
+
+    position_type: Optional[str] = Field(None, description="Тип должности")
+    position: Optional[str] = Field(None, description="Должность")
+    start_time: str = Field(..., description="Время начала работы (HH:MM:SS)")
+    description: Optional[str] = Field(None, description="Описание правила")
+
+
 class LateEmployeeSummary(BaseModel):
     """Информация об опоздавшем сотруднике"""
 
@@ -62,16 +80,21 @@ class LateEmployeeSummary(BaseModel):
     subdivision_id: Optional[int] = Field(None, description="ID подразделения")
 
     # Данные об опоздании
+    late_type: str = Field(..., description="Тип опоздания: 'lesson' или 'work_schedule'")
+    expected_time: str = Field(..., description="Ожидаемое время (начало урока или работы, HH:MM:SS)")
     first_entry_time: str = Field(..., description="Время первого входа (HH:MM:SS)")
     first_entry_datetime: str = Field(..., description="Дата и время первого входа (ISO)")
     minutes_late: int = Field(..., description="Количество минут опоздания")
+
+    # Детали опоздания
+    first_lesson: Optional[FirstLessonInfo] = Field(None, description="Информация о первом уроке (если late_type='lesson')")
+    work_schedule_rule: Optional[WorkScheduleRuleInfo] = Field(None, description="Информация о правиле (если late_type='work_schedule')")
 
 
 class LateEmployeesResponse(BaseModel):
     """Ответ со списком опоздавших сотрудников"""
 
     date: str = Field(..., description="Дата (YYYY-MM-DD)")
-    threshold_time: str = Field(..., description="Пороговое время (HH:MM:SS)")
     total_late: int = Field(..., description="Всего опоздавших")
     page: int = Field(..., description="Текущая страница")
     page_size: int = Field(..., description="Размер страницы")

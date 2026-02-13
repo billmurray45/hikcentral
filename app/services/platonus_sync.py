@@ -171,7 +171,8 @@ class PlatonusSyncService:
 
                         try:
                             # Запрос к Platonus
-                            # ВАЖНО: Берем только основную ставку (RATE = 1)
+                            # Берем запись с максимальной ставкой (RATE)
+                            # Если есть RATE = 1, берем её; если нет - берем максимальную доступную
                             platonus_query = text("""
                                 SELECT
                                     t.TutorID,
@@ -188,14 +189,15 @@ class PlatonusSyncService:
                                     t.mobilePhone,
                                     t.departmentid as subdivision_id,
                                     ss.nameru as subdivision_name,
-                                    ss.subdivision_type
+                                    ss.subdivision_type,
+                                    t.RATE
                                 FROM tutors t
                                 LEFT JOIN tutor_positions tp ON t.job_title_int = tp.id
                                 LEFT JOIN cafedras c ON t.CafedraID = c.cafedraID
                                 LEFT JOIN faculties f ON c.FacultyID = f.FacultyID
                                 LEFT JOIN structural_subdivision ss ON t.departmentid = ss.id
                                 WHERE t.iinplt = :iin
-                                  AND t.RATE = 1
+                                ORDER BY t.RATE DESC
                                 LIMIT 1;
                             """)
 
@@ -204,6 +206,12 @@ class PlatonusSyncService:
 
                             if row:
                                 # Данные найдены в Platonus
+                                rate = row[15]
+
+                                # Логировать если RATE != 1 (для отладки)
+                                if rate != 1.0 and idx % 50 == 1:
+                                    logger.info(f"Сотрудник {person_name} синхронизирован с RATE = {rate}")
+
                                 # Определить тип должности на основе должности, кафедры и подразделения
                                 position_type = determine_position_type(
                                     position_name=row[5],
@@ -211,19 +219,111 @@ class PlatonusSyncService:
                                     subdivision_id=row[12]
                                 )
 
-                                # Логика для subdivision: только для сотрудников БЕЗ кафедры
-                                # Преподаватели имеют faculty_id/cafedra_id, subdivision_id должен быть NULL
+                                # Логика для определения основного места работы:
+                                #
+                                # Случай 1: Есть И кафедра И подразделение
+                                #   → Проверяем должность:
+                                #      - Если преподавательская (профессор, доцент, преподаватель, учитель, лектор, ассистент)
+                                #        → используем КАФЕДРУ (subdivision_id = NULL)
+                                #      - Если НЕ преподавательская (консультант, специалист и т.д.)
+                                #        → используем ПОДРАЗДЕЛЕНИЕ (cafedra_id сохраняем, но subdivision - основное место)
+                                #
+                                # Случай 2: Есть ТОЛЬКО кафедра (нет подразделения)
+                                #   → ПРЕПОДАВАТЕЛЬ (используем кафедру)
+                                #
+                                # Случай 3: Есть ТОЛЬКО подразделение (нет кафедры)
+                                #   → АДМИНИСТРАТИВНЫЙ ПЕРСОНАЛ (используем подразделение)
+                                #
+                                # Примеры:
+                                #   1. Кенесары: CafedraID=15, DepartmentID=50, должность="Учитель-тренер"
+                                #      → subdivision=NULL (преподаватель)
+                                #   2. Ерлан: CafedraID=11, DepartmentID=5, должность="Консультант..."
+                                #      → subdivision=5 (административный персонал в офисе президента)
+                                #   3. Библиотекарь: CafedraID=0, DepartmentID=43
+                                #      → subdivision=43 (административный персонал)
+
                                 cafedra_id = row[6]
-                                if cafedra_id and cafedra_id > 0:
-                                    # Это преподаватель - subdivision не нужен
+                                dept_id = row[12]
+                                position_name = row[5]
+
+                                # Проверка является ли должность ЯВНО административной (не преподавательской)
+                                def is_administrative_position(pos_name: Optional[str]) -> bool:
+                                    """
+                                    Проверка явно непреподавательских должностей на основе списка tutor_positions.
+
+                                    Преподавательские должности (НЕ в списке АУП):
+                                    - Профессор, Доцент, Преподаватель, Ассистент, Лектор
+
+                                    Все остальные должности из tutor_positions - это АУП
+                                    """
+                                    if not pos_name:
+                                        return False  # NULL не является явной административной должностью
+
+                                    pos_lower = pos_name.lower()
+
+                                    # Сначала проверяем ПРЕПОДАВАТЕЛЬСКИЕ должности
+                                    # Если это преподаватель - возвращаем False (НЕ административный)
+                                    teaching_keywords = [
+                                        "профессор", "доцент", "преподаватель", "ассистент", "лектор",
+                                        "учитель"  # Включая учитель-тренер
+                                    ]
+                                    if any(keyword in pos_lower for keyword in teaching_keywords):
+                                        return False
+
+                                    # Все остальные должности из списка - это АУП
+                                    # Проверяем по ключевым словам из списка tutor_positions
+                                    admin_keywords = [
+                                        # Разработчики и IT
+                                        "разработчик", "программист", "дизайнер", "администратор",
+                                        # Специалисты
+                                        "специалист", "ведущий", "главный", "старший",
+                                        # Руководители
+                                        "руководитель", "директор", "декан", "проректор", "президент",
+                                        "вице-", "заведующий", "зам", "начальник", "председатель",
+                                        # Советники и помощники
+                                        "консультант", "советник", "помощник", "ассистент президента", "референт",
+                                        # Офисные
+                                        "менеджер", "координатор", "секретарь", "офицер",
+                                        # Финансы и право
+                                        "бухгалтер", "экономист", "юрист",
+                                        # Техперсонал и другие
+                                        "инженер", "лаборант", "методист", "библиотекарь",
+                                        "механик", "электрик", "сантехник", "водитель", "охранник",
+                                        "уборщица", "дворник", "рабочий", "мастер", "садовник",
+                                        "воспитатель", "медсестра", "наставник", "оператор",
+                                        "инструктор",  # НЕ включаем "учитель" и "тренер" - они преподаватели
+                                        "сотрудник", "аналитик", "маркетолог"
+                                    ]
+                                    return any(keyword in pos_lower for keyword in admin_keywords)
+
+                                # Определение subdivision_id
+                                if cafedra_id and cafedra_id > 0 and dept_id and dept_id > 0:
+                                    # Есть И кафедра И подразделение → проверяем должность
+                                    if is_administrative_position(position_name):
+                                        # ЯВНО административная должность → приоритет подразделению
+                                        subdivision_id = dept_id
+                                        subdivision_name = row[13]
+                                        subdivision_type = row[14]
+                                    else:
+                                        # НЕ административная (преподавательская или NULL) → приоритет кафедре
+                                        subdivision_id = None
+                                        subdivision_name = None
+                                        subdivision_type = None
+                                elif cafedra_id and cafedra_id > 0:
+                                    # Есть ТОЛЬКО кафедра → ПРЕПОДАВАТЕЛЬ
                                     subdivision_id = None
                                     subdivision_name = None
                                     subdivision_type = None
-                                else:
-                                    # Это административный персонал - используем subdivision
-                                    subdivision_id = row[12]
+                                elif dept_id and dept_id > 0:
+                                    # Есть ТОЛЬКО подразделение → АДМИНИСТРАТИВНЫЙ ПЕРСОНАЛ
+                                    subdivision_id = dept_id
                                     subdivision_name = row[13]
                                     subdivision_type = row[14]
+                                else:
+                                    # Нет ни кафедры, ни подразделения
+                                    subdivision_id = None
+                                    subdivision_name = None
+                                    subdivision_type = None
 
                                 # Создать или обновить запись
                                 employee = PlatonusEmployee(

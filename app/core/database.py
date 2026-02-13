@@ -14,8 +14,11 @@ engine = create_async_engine(
     pool_pre_ping=True,  # проверка живых connections
     pool_timeout=30,  # timeout для получения connection из pool
     connect_args={
-        "timeout": 10,  # timeout для подключения к БД
-        "command_timeout": 60,  # timeout для выполнения команд
+        "timeout": 15,  # увеличен timeout для подключения к БД
+        "command_timeout": 120,  # увеличен timeout для выполнения команд
+        "server_settings": {
+            "application_name": "hikcentral_api",  # идентификация в pg_stat_activity
+        },
     },
 )
 async_session = async_sessionmaker(engine, expire_on_commit=False)

@@ -1,12 +1,40 @@
 from contextlib import asynccontextmanager
-from fastapi import FastAPI
+import asyncio
+import logging
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.core.config import settings
 from app.core.redis import close_redis, ping_redis
 from app.core.database import engine
 from app.api import api_v1_router
+
+logger = logging.getLogger(__name__)
+
+
+class CancelledRequestMiddleware(BaseHTTPMiddleware):
+    """
+    Middleware для обработки отмененных запросов (CancelledError)
+    Предотвращает логирование ошибок, когда клиент отменяет запрос
+    """
+
+    async def dispatch(self, request: Request, call_next):
+        try:
+            response = await call_next(request)
+            return response
+        except asyncio.CancelledError:
+            # Клиент отменил запрос (закрыл страницу, таймаут на фронте и т.д.)
+            logger.info(f"Request cancelled by client: {request.method} {request.url.path}")
+            return JSONResponse(
+                status_code=499,  # Nginx Client Closed Request
+                content={"detail": "Request cancelled by client"},
+            )
+        except Exception as e:
+            # Остальные ошибки обрабатываются стандартным образом
+            logger.error(f"Unhandled error in {request.method} {request.url.path}: {e}")
+            raise
 
 
 @asynccontextmanager
@@ -82,6 +110,9 @@ app = FastAPI(
     redoc_url="/redoc",
     openapi_url="/openapi.json",
 )
+
+# Middleware для обработки отмененных запросов
+app.add_middleware(CancelledRequestMiddleware)
 
 # CORS Middleware
 app.add_middleware(
