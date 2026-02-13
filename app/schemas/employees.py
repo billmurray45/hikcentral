@@ -23,6 +23,7 @@ class EmployeeBase(BaseModel):
     subdivision_id: Optional[int] = Field(None, description="ID структурного подразделения")
     email: Optional[str] = Field(None, description="Email")
     phone: Optional[str] = Field(None, description="Телефон")
+    expected_time: Optional[str] = Field(None, description="Ожидаемое время начала работы (HH:MM). Для преподавателей - время первого урока на сегодня или 'Нет уроков'")
 
 
 class EmployeeListResponse(BaseModel):

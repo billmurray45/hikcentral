@@ -35,6 +35,7 @@ from app.api.dependencies import get_db
 from app.services.platonus_sync import PlatonusSyncService
 from app.services.work_schedule_service import WorkScheduleService
 from app.services.late_arrival_service import LateArrivalService
+from app.services.expected_time_service import ExpectedTimeService
 
 router = APIRouter(prefix="/employees", tags=["Employees"])
 
@@ -150,26 +151,43 @@ async def get_employees(
     result = await db.execute(query)
     employees_db = result.scalars().all()
 
-    # Преобразовать в схемы
-    employees = [
-        EmployeeBase(
-            tutor_id=emp.tutor_id,
-            iin=emp.iin,
-            firstname=emp.firstname,
-            lastname=emp.lastname,
-            patronymic=emp.patronymic,
-            position=emp.position,
+    # Создать сервис для определения expected_time
+    expected_time_service = ExpectedTimeService(db)
+    await expected_time_service.load_rules()  # Загрузить правила один раз
+
+    # Преобразовать в схемы с expected_time
+    employees = []
+    for emp in employees_db:
+        # Определить ожидаемое время начала работы
+        # Для преподавателей передаем IIN чтобы найти первый урок
+        expected_time = await expected_time_service.get_expected_time(
             position_type=emp.position_type,
-            cafedra=emp.cafedra_name,
-            faculty=emp.faculty_name,
-            faculty_id=emp.faculty_id,
-            subdivision=emp.subdivision_name,
+            position=emp.position,
             subdivision_id=emp.subdivision_id,
-            email=emp.email,
-            phone=emp.phone,
+            faculty_id=emp.faculty_id,
+            iin=emp.iin,  # Для преподавателей - получить время первого урока
+            target_date=None,  # Сегодня по умолчанию
         )
-        for emp in employees_db
-    ]
+
+        employees.append(
+            EmployeeBase(
+                tutor_id=emp.tutor_id,
+                iin=emp.iin,
+                firstname=emp.firstname,
+                lastname=emp.lastname,
+                patronymic=emp.patronymic,
+                position=emp.position,
+                position_type=emp.position_type,
+                cafedra=emp.cafedra_name,
+                faculty=emp.faculty_name,
+                faculty_id=emp.faculty_id,
+                subdivision=emp.subdivision_name,
+                subdivision_id=emp.subdivision_id,
+                email=emp.email,
+                phone=emp.phone,
+                expected_time=expected_time,
+            )
+        )
 
     # Вычислить количество страниц
     total_pages = (total_count + page_size - 1) // page_size
