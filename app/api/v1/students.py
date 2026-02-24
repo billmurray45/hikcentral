@@ -52,6 +52,8 @@ router = APIRouter(prefix="/students", tags=["Students"])
     - `student_type`: Тип студента (student_yu, student_yc, bachelor, master)
     - `specialization_id`: ID специальности/ОП
     - `student_group_id`: ID группы
+    - `course_number`: Курс обучения (1-5)
+    - `cafedra_id`: ID кафедры
     - `search`: Поиск по ФИО или IIN
 
     **Пагинация:**
@@ -59,7 +61,7 @@ router = APIRouter(prefix="/students", tags=["Students"])
     - `page_size`: Размер страницы (default: 20, min: 10, max: 100)
 
     **Сортировка:**
-    - `sort_by`: Поле для сортировки (lastname, firstname, student_type)
+    - `sort_by`: Поле для сортировки (lastname, firstname, student_type, course_number)
     - `sort_order`: Порядок сортировки (asc, desc)
     """,
 )
@@ -67,6 +69,8 @@ async def get_students(
     student_type: Optional[str] = Query(None, description="Тип студента (student_yu, student_yc, bachelor, master)"),
     specialization_id: Optional[int] = Query(None, description="ID специальности"),
     student_group_id: Optional[int] = Query(None, description="ID группы"),
+    course_number: Optional[int] = Query(None, ge=1, le=5, description="Курс обучения (1-5)"),
+    cafedra_id: Optional[int] = Query(None, description="ID кафедры"),
     search: Optional[str] = Query(None, description="Поиск по ФИО или IIN"),
     page: int = Query(1, ge=1, description="Номер страницы"),
     page_size: int = Query(20, ge=10, le=100, description="Размер страницы"),
@@ -96,6 +100,14 @@ async def get_students(
     if student_group_id is not None:
         query = query.where(PlatonusStudent.student_group_id == student_group_id)
         count_query = count_query.where(PlatonusStudent.student_group_id == student_group_id)
+
+    if course_number is not None:
+        query = query.where(PlatonusStudent.course_number == course_number)
+        count_query = count_query.where(PlatonusStudent.course_number == course_number)
+
+    if cafedra_id is not None:
+        query = query.where(PlatonusStudent.cafedra_id == cafedra_id)
+        count_query = count_query.where(PlatonusStudent.cafedra_id == cafedra_id)
 
     if search:
         search_pattern = f"%{search}%"
@@ -166,6 +178,10 @@ async def get_students(
                 specialization_code=student.specialization_code,
                 enrollment_year=student.enrollment_year,
                 study_year=student.study_year,
+                course_number=student.course_number,
+                degree=student.degree,
+                cafedra_id=student.cafedra_id,
+                cafedra_name=student.cafedra_name,
                 email=student.email,
                 phone=student.phone,
                 expected_time=expected_time,
@@ -758,8 +774,8 @@ async def get_student_attendance_history(
         total_records=total_count,
         total_entries=total_entries,
         total_exits=total_exits,
-        first_record_date=first_record_date.isoformat() if first_record_date else None,
-        last_record_date=last_record_date.isoformat() if last_record_date else None,
+        first_record_date=first_record_date if isinstance(first_record_date, str) else (first_record_date.isoformat() if first_record_date else None),
+        last_record_date=last_record_date if isinstance(last_record_date, str) else (last_record_date.isoformat() if last_record_date else None),
         page=page,
         page_size=page_size,
         total_pages=total_pages,

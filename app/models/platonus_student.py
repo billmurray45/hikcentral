@@ -37,7 +37,13 @@ class PlatonusStudent(Base):
 
     # Курс и год поступления
     enrollment_year = Column(Integer, nullable=True, comment="Год поступления")
-    study_year = Column(SmallInteger, nullable=True, comment="Текущий курс (1, 2, 3, 4)")
+    study_year = Column(SmallInteger, nullable=True, comment="Текущий курс (устаревшее, используйте course_number)")
+    course_number = Column(SmallInteger, nullable=True, index=True, comment="Курс обучения (1, 2, 3, 4, 5)")
+
+    # Степень и кафедра
+    degree = Column(String(256), nullable=True, comment="Степень обучения (Бакалавр, Магистр, PhD)")
+    cafedra_id = Column(Integer, nullable=True, index=True, comment="ID кафедры в Platonus")
+    cafedra_name = Column(String(256), nullable=True, comment="Название кафедры")
 
     # Контакты
     email = Column(String(512), nullable=True, comment="Email")

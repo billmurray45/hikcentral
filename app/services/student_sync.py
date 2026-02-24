@@ -155,6 +155,7 @@ class StudentSyncService:
                         # Запрос к Platonus с правильной структурой таблиц
                         # students.groupID -> groups.groupID
                         # students.specializationID -> specializations.id
+                        # specializations.prof_caf_id -> cafedras.cafedraID
                         platonus_query = text("""
                             SELECT
                                 s.StudentID as student_id,
@@ -168,10 +169,15 @@ class StudentSyncService:
                                 sp.nameru as spec_name,
                                 sp.specializationCode as spec_code,
                                 s.mail as email,
-                                s.mobilePhone as phone
+                                s.mobilePhone as phone,
+                                s.CourseNumber,
+                                sp.degree_ru,
+                                c.cafedraID,
+                                c.cafedraNameRU
                             FROM students s
                             LEFT JOIN `groups` g ON s.groupID = g.groupID
                             LEFT JOIN specializations sp ON s.specializationID = sp.id
+                            LEFT JOIN cafedras c ON sp.prof_caf_id = c.cafedraID
                             WHERE s.iinplt = :iin
                             LIMIT 1;
                         """)
@@ -183,7 +189,7 @@ class StudentSyncService:
                             # Данные найдены в Platonus
                             # row: student_id, iinplt, firstname, lastname, patronymic,
                             #      groupID, group_name, specializationID, spec_name, spec_code,
-                            #      email, phone
+                            #      email, phone, CourseNumber, degree_ru, cafedraID, cafedraNameRU
                             student = PlatonusStudent(
                                 iin=iin,
                                 student_id=row[0],
@@ -198,6 +204,10 @@ class StudentSyncService:
                                 specialization_name=row[8],
                                 enrollment_year=None,
                                 study_year=None,
+                                course_number=row[12],
+                                degree=row[13],
+                                cafedra_id=row[14],
+                                cafedra_name=row[15],
                                 email=row[10],
                                 phone=row[11],
                                 synced_at=datetime.utcnow(),

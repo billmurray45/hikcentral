@@ -21,7 +21,11 @@ class StudentBase(BaseModel):
     specialization_id: Optional[int] = Field(None, description="ID специальности")
     specialization_code: Optional[str] = Field(None, description="Код специальности")
     enrollment_year: Optional[int] = Field(None, description="Год поступления")
-    study_year: Optional[int] = Field(None, description="Текущий курс")
+    study_year: Optional[int] = Field(None, description="Текущий курс (устаревшее)")
+    course_number: Optional[int] = Field(None, description="Курс обучения (1-5)")
+    degree: Optional[str] = Field(None, description="Степень обучения (Бакалавр, Магистр, PhD)")
+    cafedra_id: Optional[int] = Field(None, description="ID кафедры")
+    cafedra_name: Optional[str] = Field(None, description="Название кафедры")
     email: Optional[str] = Field(None, description="Email")
     phone: Optional[str] = Field(None, description="Телефон")
     expected_time: Optional[str] = Field(
