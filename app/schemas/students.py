@@ -314,3 +314,84 @@ class StudentLateStatisticsResponse(BaseModel):
     by_day: list[DailyStudentLateStats] = Field(
         default_factory=list, description="Динамика опозданий по дням"
     )
+
+
+# ==========================================
+# Расписание студентов
+# ==========================================
+
+
+class StudentScheduleLesson(BaseModel):
+    """Одно занятие в расписании студента"""
+
+    id: int = Field(..., description="ID записи")
+    week_day: int = Field(..., description="День недели (1-7)")
+    day_name_ru: str = Field(..., description="Название дня на русском")
+    day_name_en: str = Field(..., description="Название дня на английском")
+    lesson_number: int = Field(..., description="Номер пары")
+    lesson_start: str = Field(..., description="Время начала (HH:MM)")
+    lesson_finish: str = Field(..., description="Время окончания (HH:MM)")
+    time_range: str = Field(..., description="Диапазон времени (HH:MM-HH:MM)")
+    subject_name: str = Field(..., description="Название предмета")
+    teacher_name: Optional[str] = Field(None, description="ФИО преподавателя")
+    teacher_iin: Optional[str] = Field(None, description="ИИН преподавателя")
+    auditory_number: Optional[str] = Field(None, description="Номер аудитории")
+    building_number: Optional[str] = Field(None, description="Номер корпуса")
+    full_auditory: Optional[str] = Field(None, description="Полный адрес аудитории")
+    study_year: int = Field(..., description="Учебный год")
+    study_term: int = Field(..., description="Семестр")
+    academic_period: str = Field(..., description="Учебный период")
+
+
+class StudentScheduleListResponse(BaseModel):
+    """Полное расписание студента"""
+
+    iin: str = Field(..., description="ИИН студента")
+    firstname: str = Field(..., description="Имя")
+    lastname: str = Field(..., description="Фамилия")
+    patronymic: Optional[str] = Field(None, description="Отчество")
+    student_group: str = Field(..., description="Название группы")
+    student_group_id: int = Field(..., description="ID группы")
+    course_number: Optional[int] = Field(None, description="Курс")
+    degree: Optional[str] = Field(None, description="Степень обучения")
+    study_year: int = Field(..., description="Учебный год")
+    study_term: int = Field(..., description="Семестр")
+    academic_period: str = Field(..., description="Учебный период")
+    total_lessons: int = Field(..., description="Всего занятий")
+    unique_subjects: int = Field(..., description="Уникальных предметов")
+    unique_teachers: int = Field(..., description="Уникальных преподавателей")
+    lessons: list[StudentScheduleLesson] = Field(default_factory=list, description="Список занятий")
+
+
+class StudentScheduleDayResponse(BaseModel):
+    """Расписание студента на один день"""
+
+    iin: str = Field(..., description="ИИН студента")
+    firstname: str = Field(..., description="Имя")
+    lastname: str = Field(..., description="Фамилия")
+    student_group: str = Field(..., description="Название группы")
+    week_day: int = Field(..., description="День недели (1-7)")
+    day_name_ru: str = Field(..., description="Название дня на русском")
+    day_name_en: str = Field(..., description="Название дня на английском")
+    total_lessons: int = Field(..., description="Количество пар")
+    lessons: list[StudentScheduleLesson] = Field(default_factory=list, description="Список занятий")
+
+
+class StudentScheduleWeekResponse(BaseModel):
+    """Недельное расписание студента, сгруппированное по дням"""
+
+    iin: str = Field(..., description="ИИН студента")
+    firstname: str = Field(..., description="Имя")
+    lastname: str = Field(..., description="Фамилия")
+    patronymic: Optional[str] = Field(None, description="Отчество")
+    student_group: str = Field(..., description="Название группы")
+    student_group_id: int = Field(..., description="ID группы")
+    course_number: Optional[int] = Field(None, description="Курс")
+    study_year: int = Field(..., description="Учебный год")
+    study_term: int = Field(..., description="Семестр")
+    academic_period: str = Field(..., description="Учебный период")
+    total_lessons: int = Field(..., description="Всего занятий")
+    working_days: int = Field(..., description="Учебных дней")
+    schedule_by_day: list[StudentScheduleDayResponse] = Field(
+        default_factory=list, description="Расписание по дням"
+    )
