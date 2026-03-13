@@ -19,6 +19,9 @@ from app.schemas.students import (
     LateStudentSummary,
     LateStudentsResponse,
     FirstLessonStudentInfo,
+    AbsentStudentSummary,
+    AbsentStudentsResponse,
+    AbsentStudentFirstLesson,
     Specialization,
     SpecializationListResponse,
     StudentGroup,
@@ -665,6 +668,117 @@ async def get_late_students(
     return LateStudentsResponse(
         date=result["date"],
         total_late=result["total_late"],
+        page=result["page"],
+        page_size=result["page_size"],
+        total_pages=result["total_pages"],
+        items=items,
+    )
+
+
+@router.get(
+    "/attendance/absent",
+    response_model=AbsentStudentsResponse,
+    summary="Отсутствующие студенты",
+    description="""
+    Получить список студентов, которые должны были быть на занятиях, но не пришли.
+
+    **Логика определения отсутствия:**
+    - Проверяется наличие занятий у группы студента на каждый день периода
+    - Если занятия есть, но студент не прошёл турникет - он отсутствовал
+
+    **Параметры (обязательные):**
+    - `date_from`: Начало периода (YYYY-MM-DD)
+    - `date_to`: Конец периода (YYYY-MM-DD)
+
+    **Фильтры:**
+    - `specialization_id`: ID специальности
+    - `student_group_id`: ID группы
+    - `course_number`: Курс (1-5)
+
+    **Пагинация:**
+    - `page`: Номер страницы (default: 1)
+    - `page_size`: Размер страницы (default: 50, max: 100)
+
+    **Примечание:** Выходные дни (суббота, воскресенье) автоматически пропускаются.
+    Максимальный период - 90 дней.
+    """,
+)
+async def get_absent_students(
+    date_from: str = Query(..., description="Начало периода (YYYY-MM-DD)"),
+    date_to: str = Query(..., description="Конец периода (YYYY-MM-DD)"),
+    specialization_id: Optional[int] = Query(None, description="ID специальности"),
+    student_group_id: Optional[int] = Query(None, description="ID группы"),
+    course_number: Optional[int] = Query(None, description="Курс (1-5)"),
+    page: int = Query(1, ge=1, description="Номер страницы"),
+    page_size: int = Query(50, ge=10, le=100, description="Размер страницы"),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Получить список отсутствующих студентов за период
+    """
+
+    # Парсинг дат
+    try:
+        start_date = datetime.strptime(date_from, "%Y-%m-%d").date()
+        end_date = datetime.strptime(date_to, "%Y-%m-%d").date()
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Неверный формат даты. Используйте YYYY-MM-DD")
+
+    if start_date > end_date:
+        raise HTTPException(status_code=400, detail="date_from должен быть раньше date_to")
+
+    # Ограничение периода - максимум 90 дней
+    if (end_date - start_date).days > 90:
+        raise HTTPException(status_code=400, detail="Максимальный период - 90 дней")
+
+    # Использовать сервис
+    service = StudentLateService(db)
+    result = await service.get_absent_students(
+        date_from=start_date,
+        date_to=end_date,
+        specialization_id=specialization_id,
+        student_group_id=student_group_id,
+        course_number=course_number,
+        page=page,
+        page_size=page_size,
+    )
+
+    # Преобразовать в схемы
+    items = []
+    for item in result["items"]:
+        first_lesson = None
+        if item.get("first_lesson"):
+            first_lesson = AbsentStudentFirstLesson(
+                subject=item["first_lesson"]["subject"],
+                teacher=item["first_lesson"]["teacher"],
+                time_range=item["first_lesson"]["time_range"],
+                auditory=item["first_lesson"]["auditory"],
+                lesson_start=item["first_lesson"]["lesson_start"],
+            )
+
+        items.append(
+            AbsentStudentSummary(
+                iin=item["iin"],
+                firstname=item["firstname"],
+                lastname=item["lastname"],
+                patronymic=item["patronymic"],
+                student_type=item["student_type"],
+                student_group=item["student_group"],
+                student_group_id=item["student_group_id"],
+                specialization=item["specialization"],
+                specialization_id=item["specialization_id"],
+                course_number=item["course_number"],
+                absent_date=item["absent_date"],
+                expected_time=item["expected_time"],
+                first_lesson=first_lesson,
+            )
+        )
+
+    return AbsentStudentsResponse(
+        date_from=result["date_from"],
+        date_to=result["date_to"],
+        working_days=result["working_days"],
+        total_absent=result["total_absent"],
         page=result["page"],
         page_size=result["page_size"],
         total_pages=result["total_pages"],

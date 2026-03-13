@@ -103,6 +103,63 @@ class LateStudentsResponse(BaseModel):
 
 
 # ==========================================
+# Отсутствующие студенты
+# ==========================================
+
+
+class AbsentStudentFirstLesson(BaseModel):
+    """Информация о первом занятии отсутствующего студента"""
+
+    subject: str = Field(..., description="Название предмета")
+    teacher: Optional[str] = Field(None, description="Преподаватель")
+    time_range: str = Field(..., description="Время занятия (HH:MM-HH:MM)")
+    auditory: Optional[str] = Field(None, description="Аудитория")
+    lesson_start: str = Field(..., description="Время начала занятия (HH:MM:SS)")
+
+
+class AbsentStudentSummary(BaseModel):
+    """Информация об отсутствующем студенте"""
+
+    # Данные студента
+    iin: str = Field(..., description="ИИН")
+    firstname: str = Field(..., description="Имя")
+    lastname: str = Field(..., description="Фамилия")
+    patronymic: Optional[str] = Field(None, description="Отчество")
+    student_type: Optional[str] = Field(None, description="Тип студента")
+
+    # Структура
+    student_group: Optional[str] = Field(None, description="Группа")
+    student_group_id: Optional[int] = Field(None, description="ID группы")
+    specialization: Optional[str] = Field(None, description="Специальность/ОП")
+    specialization_id: Optional[int] = Field(None, description="ID специальности")
+    course_number: Optional[int] = Field(None, description="Курс")
+
+    # Данные об отсутствии
+    absent_date: str = Field(..., description="Дата отсутствия (YYYY-MM-DD)")
+    expected_time: Optional[str] = Field(None, description="Ожидаемое время начала занятия (HH:MM:SS)")
+
+    # Детали занятия
+    first_lesson: Optional[AbsentStudentFirstLesson] = Field(
+        None, description="Информация о первом занятии"
+    )
+
+
+class AbsentStudentsResponse(BaseModel):
+    """Ответ со списком отсутствующих студентов"""
+
+    date_from: str = Field(..., description="Начало периода (YYYY-MM-DD)")
+    date_to: str = Field(..., description="Конец периода (YYYY-MM-DD)")
+    working_days: int = Field(..., description="Количество рабочих дней в периоде")
+    total_absent: int = Field(..., description="Всего записей об отсутствии")
+    page: int = Field(..., description="Текущая страница")
+    page_size: int = Field(..., description="Размер страницы")
+    total_pages: int = Field(..., description="Всего страниц")
+    items: list[AbsentStudentSummary] = Field(
+        default_factory=list, description="Список отсутствующих студентов"
+    )
+
+
+# ==========================================
 # Посещаемость студентов
 # ==========================================
 
