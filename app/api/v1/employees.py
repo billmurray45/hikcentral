@@ -481,21 +481,30 @@ async def get_employees_attendance(
 
     **Параметры:**
     - `date`: Дата для проверки (YYYY-MM-DD). Если не указана - берется сегодняшняя дата
+    - `date_from`: Начало периода (YYYY-MM-DD). Если указан вместе с date_to - получить за период
+    - `date_to`: Конец периода (YYYY-MM-DD). Используется вместе с date_from
     - `faculty_id`: Фильтр по факультету (для преподавателей)
     - `subdivision_id`: Фильтр по подразделению
     - `position_type`: Фильтр по типу должности
     - `page`: Номер страницы (default: 1)
     - `page_size`: Размер страницы (default: 20, min: 10, max: 100)
 
+    **Режимы:**
+    1. **За один день**: `?date=2026-02-27`
+    2. **За период**: `?date_from=2026-02-01&date_to=2026-02-28`
+
     **Response содержит:**
     - `late_type`: "lesson" (опоздание на урок) или "work_schedule" (по правилу)
     - `expected_time`: Ожидаемое время (начало урока или работы)
     - `first_lesson`: Детали первого урока (для преподавателей)
     - `work_schedule_rule`: Детали правила (для остальных)
+    - `late_date`: Дата опоздания (только для режима периода)
     """,
 )
 async def get_late_employees(
     date_param: Optional[str] = Query(None, alias="date", description="Дата (YYYY-MM-DD)"),
+    date_from: Optional[str] = Query(None, description="Начало периода (YYYY-MM-DD)"),
+    date_to: Optional[str] = Query(None, description="Конец периода (YYYY-MM-DD)"),
     faculty_id: Optional[int] = Query(None, description="ID факультета"),
     subdivision_id: Optional[int] = Query(None, description="ID подразделения"),
     position_type: Optional[str] = Query(None, description="Тип должности"),
@@ -504,10 +513,39 @@ async def get_late_employees(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Получить список опоздавших сотрудников за день
+    Получить список опоздавших сотрудников за день или период
     """
 
-    # Определить дату
+    late_service = LateArrivalService(db)
+
+    # Режим периода
+    if date_from and date_to:
+        try:
+            start_date = datetime.strptime(date_from, "%Y-%m-%d").date()
+            end_date = datetime.strptime(date_to, "%Y-%m-%d").date()
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Неверный формат даты. Используйте YYYY-MM-DD")
+
+        if start_date > end_date:
+            raise HTTPException(status_code=400, detail="date_from должен быть раньше date_to")
+
+        # Ограничение периода - максимум 90 дней
+        if (end_date - start_date).days > 90:
+            raise HTTPException(status_code=400, detail="Максимальный период - 90 дней")
+
+        result = await late_service.get_late_arrivals_period(
+            date_from=start_date,
+            date_to=end_date,
+            faculty_id=faculty_id,
+            subdivision_id=subdivision_id,
+            position_type=position_type,
+            page=page,
+            page_size=page_size,
+        )
+
+        return result
+
+    # Режим одного дня
     if date_param:
         try:
             target_date = datetime.strptime(date_param, "%Y-%m-%d").date()
@@ -516,8 +554,6 @@ async def get_late_employees(
     else:
         target_date = date.today()
 
-    # Использовать LateArrivalService
-    late_service = LateArrivalService(db)
     result = await late_service.get_late_arrivals(
         target_date=target_date,
         faculty_id=faculty_id,

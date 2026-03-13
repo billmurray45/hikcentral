@@ -81,6 +81,7 @@ class LateStudentSummary(BaseModel):
     first_entry_time: str = Field(..., description="Время первого входа (HH:MM:SS)")
     first_entry_datetime: str = Field(..., description="Дата и время первого входа (ISO)")
     minutes_late: int = Field(..., description="Количество минут опоздания")
+    late_date: Optional[str] = Field(None, description="Дата опоздания (YYYY-MM-DD), используется для режима периода")
 
     # Детали опоздания
     first_lesson: Optional[FirstLessonStudentInfo] = Field(

@@ -513,17 +513,25 @@ async def get_students_attendance(
 
     **Фильтры:**
     - `date`: Дата (YYYY-MM-DD), по умолчанию сегодня
+    - `date_from`: Начало периода (YYYY-MM-DD). Используется вместе с date_to
+    - `date_to`: Конец периода (YYYY-MM-DD). Используется вместе с date_from
     - `specialization_id`: ID специальности
     - `student_group_id`: ID группы
     - `student_type`: Тип студента
 
+    **Режимы:**
+    1. **За один день**: `?date=2026-02-27`
+    2. **За период**: `?date_from=2026-02-01&date_to=2026-02-28`
+
     **Пагинация:**
     - `page`: Номер страницы (default: 1, min: 1)
-    - `page_size`: Размер страницы (default: 20, min: 10, max: 100)
+    - `page_size`: Размер страницы (default: 50, min: 10, max: 100)
     """,
 )
 async def get_late_students(
     date_param: Optional[str] = Query(None, alias="date", description="Дата (YYYY-MM-DD)"),
+    date_from: Optional[str] = Query(None, description="Начало периода (YYYY-MM-DD)"),
+    date_to: Optional[str] = Query(None, description="Конец периода (YYYY-MM-DD)"),
     specialization_id: Optional[int] = Query(None, description="ID специальности"),
     student_group_id: Optional[int] = Query(None, description="ID группы"),
     student_type: Optional[str] = Query(None, description="Тип студента"),
@@ -532,10 +540,80 @@ async def get_late_students(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Получить список опоздавших студентов
+    Получить список опоздавших студентов за день или период
     """
 
-    # Определить дату
+    service = StudentLateService(db)
+
+    # Режим периода
+    if date_from and date_to:
+        try:
+            start_date = datetime.strptime(date_from, "%Y-%m-%d").date()
+            end_date = datetime.strptime(date_to, "%Y-%m-%d").date()
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Неверный формат даты. Используйте YYYY-MM-DD")
+
+        if start_date > end_date:
+            raise HTTPException(status_code=400, detail="date_from должен быть раньше date_to")
+
+        # Ограничение периода - максимум 90 дней
+        if (end_date - start_date).days > 90:
+            raise HTTPException(status_code=400, detail="Максимальный период - 90 дней")
+
+        result = await service.get_late_arrivals_period(
+            date_from=start_date,
+            date_to=end_date,
+            specialization_id=specialization_id,
+            student_group_id=student_group_id,
+            student_type=student_type,
+            page=page,
+            page_size=page_size,
+        )
+
+        # Преобразовать в схемы для периода
+        items = []
+        for item in result["items"]:
+            first_lesson = None
+            if item.get("first_lesson"):
+                first_lesson = FirstLessonStudentInfo(
+                    subject=item["first_lesson"]["subject"],
+                    teacher=item["first_lesson"]["teacher"],
+                    time_range=item["first_lesson"]["time_range"],
+                    auditory=item["first_lesson"]["auditory"],
+                )
+
+            items.append(
+                LateStudentSummary(
+                    iin=item["iin"],
+                    firstname=item["firstname"],
+                    lastname=item["lastname"],
+                    patronymic=item["patronymic"],
+                    student_type=item["student_type"],
+                    student_group=item["student_group"],
+                    student_group_id=item["student_group_id"],
+                    specialization=item["specialization"],
+                    specialization_id=item["specialization_id"],
+                    expected_time=item["expected_time"],
+                    first_entry_time=item["first_entry_time"],
+                    first_entry_datetime=item["first_entry_datetime"],
+                    minutes_late=item["minutes_late"],
+                    first_lesson=first_lesson,
+                    late_date=item.get("late_date"),
+                )
+            )
+
+        return {
+            "date_from": result["date_from"],
+            "date_to": result["date_to"],
+            "working_days": result["working_days"],
+            "total_late": result["total_late"],
+            "page": result["page"],
+            "page_size": result["page_size"],
+            "total_pages": result["total_pages"],
+            "items": items,
+        }
+
+    # Режим одного дня
     if date_param:
         try:
             target_date = datetime.strptime(date_param, "%Y-%m-%d").date()
@@ -544,8 +622,6 @@ async def get_late_students(
     else:
         target_date = date.today()
 
-    # Использовать сервис
-    service = StudentLateService(db)
     result = await service.get_late_arrivals(
         target_date=target_date,
         specialization_id=specialization_id,

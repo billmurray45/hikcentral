@@ -3,7 +3,7 @@
 Учитывает расписание студенческих групп
 """
 
-from datetime import date, time, datetime
+from datetime import date, time, datetime, timedelta
 from typing import Optional, Dict, Any
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, text, and_
@@ -161,6 +161,87 @@ class StudentLateService:
 
         return {
             "date": target_date.isoformat(),
+            "total_late": total,
+            "page": page,
+            "page_size": page_size,
+            "total_pages": total_pages,
+            "items": paginated_items,
+        }
+
+    async def get_late_arrivals_period(
+        self,
+        date_from: date,
+        date_to: date,
+        specialization_id: Optional[int] = None,
+        student_group_id: Optional[int] = None,
+        student_type: Optional[str] = None,
+        page: int = 1,
+        page_size: int = 50,
+    ) -> Dict[str, Any]:
+        """
+        Получить список опоздавших студентов за период
+
+        Args:
+            date_from: Начало периода
+            date_to: Конец периода
+            specialization_id: Фильтр по специальности
+            student_group_id: Фильтр по группе
+            student_type: Фильтр по типу студента
+            page: Номер страницы
+            page_size: Размер страницы
+
+        Returns:
+            Словарь с результатами
+        """
+
+        logger.info(f"Получение опозданий студентов за период {date_from} - {date_to}")
+
+        all_late_arrivals = []
+
+        # Проходим по каждому дню периода
+        current_date = date_from
+        while current_date <= date_to:
+            # Пропускаем выходные (суббота=6, воскресенье=7)
+            if current_date.isoweekday() <= 5:
+                day_result = await self.get_late_arrivals(
+                    target_date=current_date,
+                    specialization_id=specialization_id,
+                    student_group_id=student_group_id,
+                    student_type=student_type,
+                    page=1,
+                    page_size=10000,  # Получаем все за день
+                )
+
+                # Добавляем дату к каждой записи
+                for item in day_result["items"]:
+                    item["late_date"] = current_date.isoformat()
+                    all_late_arrivals.append(item)
+
+            current_date += timedelta(days=1)
+
+        # Сортировка: сначала по дате (новые сверху), потом по минутам опоздания
+        all_late_arrivals.sort(
+            key=lambda x: (x["late_date"], -x["minutes_late"]),
+            reverse=True
+        )
+
+        # Пагинация
+        total = len(all_late_arrivals)
+        start_idx = (page - 1) * page_size
+        end_idx = start_idx + page_size
+        paginated_items = all_late_arrivals[start_idx:end_idx]
+
+        total_pages = (total + page_size - 1) // page_size
+
+        # Статистика по дням
+        days_count = (date_to - date_from).days + 1
+        working_days = sum(1 for i in range(days_count)
+                         if (date_from + timedelta(days=i)).isoweekday() <= 5)
+
+        return {
+            "date_from": date_from.isoformat(),
+            "date_to": date_to.isoformat(),
+            "working_days": working_days,
             "total_late": total,
             "page": page,
             "page_size": page_size,
