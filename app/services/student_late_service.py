@@ -128,7 +128,8 @@ class StudentLateService:
             # Конвертировать access_datetime из строки в datetime, если нужно
             first_entry_datetime = student[10]
             if isinstance(first_entry_datetime, str):
-                first_entry_datetime = datetime.fromisoformat(first_entry_datetime)
+                dt_str = first_entry_datetime.replace("T", " ")
+                first_entry_datetime = datetime.strptime(dt_str, "%Y-%m-%d %H:%M:%S")
 
             late_info = await self._check_student_late(
                 iin=student[0],

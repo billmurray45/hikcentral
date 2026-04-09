@@ -125,8 +125,9 @@ class LateArrivalService:
             # Конвертировать access_datetime из строки в datetime, если нужно
             first_entry_datetime = emp[13]
             if isinstance(first_entry_datetime, str):
-                # Parse datetime string (format: "YYYY-MM-DD HH:MM:SS")
-                first_entry_datetime = datetime.fromisoformat(first_entry_datetime)
+                # Parse datetime string - replace T separator and handle missing leading zeros
+                dt_str = first_entry_datetime.replace("T", " ")
+                first_entry_datetime = datetime.strptime(dt_str, "%Y-%m-%d %H:%M:%S")
 
             late_info = await self._check_employee_late(
                 iin=emp[0],
